@@ -12,8 +12,7 @@ so we have the annual enthalpy thresholds, and the seasonal enthalpy thresholds
 import xarray as xr
 import glob
 
-import xarray as xr
-import glob
+
 
 def main():
     # 1. Load the data 
@@ -25,7 +24,7 @@ def main():
     # Rechunk to have continuous time chunks for quantile calculation
     ds = ds.chunk({'time': -1}) 
 
-    quantiles = [0.90, 0.95, 0.99]
+    quantiles = [0.01, 0.05, 0.10, 0.90, 0.95, 0.99]
 
     # 2. Calculate the Annual percentiles
     print("Calculating annual percentiles...")
@@ -64,7 +63,7 @@ def main():
     # Rechunk to have continuous time chunks for quantile calculation
     ds = ds.chunk({'time': -1}) 
 
-    quantiles = [0.90, 0.95, 0.99]
+    quantiles = [0.01, 0.05, 0.10, 0.90, 0.95, 0.99]
 
     # 2. Calculate the Annual percentiles
     print("Calculating annual percentiles...")
