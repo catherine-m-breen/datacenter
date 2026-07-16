@@ -78,10 +78,10 @@ def main():
     print("Structuring final dataset...")
     ds_out = xr.Dataset({
         'enthalpy_annual': annual_quantiles,
-        'enthalpy_winter': seasonal_quantiles.sel(season='DJF'),
-        'enthalpy_spring': seasonal_quantiles.sel(season='MAM'),
-        'enthalpy_summer': seasonal_quantiles.sel(season='JJA'),
-        'enthalpy_fall':   seasonal_quantiles.sel(season='SON')
+        'enthalpy_winter': seasonal_quantiles.sel(season='DJF').drop_vars('season'),
+        'enthalpy_spring': seasonal_quantiles.sel(season='MAM').drop_vars('season'),
+        'enthalpy_summer': seasonal_quantiles.sel(season='JJA').drop_vars('season'),
+        'enthalpy_fall':   seasonal_quantiles.sel(season='SON').drop_vars('season')
     })
 
     # 5. Save the results to a single NetCDF file
