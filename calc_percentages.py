@@ -8,6 +8,7 @@ fall: sept, oct, nov
 save as four additional bands; 
 so we have the annual enthalpy thresholds, and the seasonal enthalpy thresholds 
 
+
 '''
 import xarray as xr
 import glob

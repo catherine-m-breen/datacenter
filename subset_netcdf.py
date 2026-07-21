@@ -39,7 +39,6 @@ for file in tqdm.tqdm(forcing_files):
     W = ds_nova['Qair'] / (1.0 - ds_nova['Qair'])
 
     #enthalpy = 1.006 * T_db + W * (2501.0 + 1.86 * T_db) ## measured in kJ/kg
-    ## I am confused if temp_air is the same
     enthalpy = 1.006 * temp + W * (2501.0 + 1.86 * temp)
     #max_enthalpy_rasters.append(enthalpy)
 
