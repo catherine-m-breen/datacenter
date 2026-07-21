@@ -11,6 +11,10 @@ add whether it crossed it's respective seasonal 90, 95, 99 threshold
 (datacenter) cmbreen@discover31:/discover/nobackup/cmbreen/datacenters> cat datacenter_perc.o57167567
 finishes running 
 
+## this is now running here: 
+cmbreen@discover32:/discover/nobackup/cmbreen/datacenters> sbatch sbatch_percentiles
+Submitted batch job 57253580
+
 '''
 import xarray as xr
 import glob
@@ -18,7 +22,7 @@ import xarray as xr
 import matplotlib.pyplot as plt
 import tqdm
 import os
-
+import numpy as np
 
 # virginia = '/discover/nobackup/cmbreen/datacenters/virginia/*.nc' ## 8400 files 
 # texas = '/discover/nobackup/cmbreen/datacenters/texas/*.nc' ## 8400 
