@@ -62,6 +62,7 @@ def process_region(raw_files_glob, thresh_file, out_file, region_name):
     print(f"[{region_name}] Mapping seasons...")
     # xarray 'time.season' outputs 'DJF', 'MAM', 'JJA', 'SON'
     ds['season'] = ds['time.season']
+    shape = (len(ds_thresh.quantile), len(ds.time), len(ds.lat), len(ds.lon))
     
         # Use dask to create an empty array of the right shape and chunks
     empty_data = da.full(
