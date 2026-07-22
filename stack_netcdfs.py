@@ -62,26 +62,29 @@ def process_region(raw_files_glob, thresh_file, out_file, region_name):
     print(f"[{region_name}] Mapping seasons...")
     # xarray 'time.season' outputs 'DJF', 'MAM', 'JJA', 'SON'
     ds['season'] = ds['time.season']
-    shape = (len(ds_thresh.quantile), len(ds.time), len(ds.lat), len(ds.lon))
+    # shape = (len(ds_thresh.quantile), len(ds.time), len(ds.lat), len(ds.lon))
+    print(f"[{region_name}] Building seasonal thresholds...")
     
-        # Use dask to create an empty array of the right shape and chunks
+    # DEFINING SHAPE HERE using bracket notation to avoid method conflicts
+    shape = (len(ds_thresh['quantile']), len(ds['time']), len(ds['lat']), len(ds['lon']))
+    
+    # Use dask to create an empty array of the right shape and chunks
     empty_data = da.full(
         shape, 
         np.nan, 
-        chunks=(len(ds_thresh.quantile), 100, len(ds.lat), len(ds.lon))
+        chunks=(len(ds_thresh['quantile']), 100, len(ds['lat']), len(ds['lon']))
     )
-    # 4. Build a continuous time-series of the correct seasonal thresholds
-    # We create an empty array shaped like our data, then fill it season by season
+    
     seasonal_thresholds = xr.DataArray(
         empty_data, 
         coords={
-            'quantile': ds_thresh.quantile, 
-            'time': ds.time, 
-            'lat': ds.lat, 
-            'lon': ds.lon
-        },
+            'quantile': ds_thresh['quantile'], 
+            'time': ds['time'], 
+            'lat': ds['lat'], 
+            'lon': ds['lon']
+        }, 
         dims=['quantile', 'time', 'lat', 'lon']
-    ).chunk({'time': 100}) ## chunk in 100 timesteps at a time 
+    )
     
     season_map = {
         'DJF': 'enthalpy_winter',
