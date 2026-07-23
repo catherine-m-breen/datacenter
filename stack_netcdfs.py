@@ -155,7 +155,7 @@ import numpy as np
 def process_region(raw_files_glob, thresh_file, out_dir, region_name):
     print(f"[{region_name}] Loading raw files and thresholds...")
     
-    files = sorted(glob.glob(raw_files_glob))
+    files = sorted(glob.glob(raw_files_glob))[:100]
     
     # Fix for the FutureWarning: explicitly set data_vars or use default
     ds = xr.open_mfdataset(
