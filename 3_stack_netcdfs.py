@@ -11,9 +11,11 @@ add whether it crossed it's respective seasonal 90, 95, 99 threshold
 (datacenter) cmbreen@discover31:/discover/nobackup/cmbreen/datacenters> cat datacenter_perc.o57167567
 finishes running 
 
-## this is now running here: 
-cmbreen@discover32:/discover/nobackup/cmbreen/datacenters> sbatch sbatch_percentiles
-Submitted batch job 57253580
+### all three scripts (so that we have temp min and max too) are running here: 
+
+(datacenter) cmbreen@discover35:/discover/nobackup/cmbreen/datacenters> sbatch sbatch_percentiles
+Submitted batch job 57299647
+
 
 '''
 import dask.array as da
@@ -153,6 +155,53 @@ import glob
 import os
 import numpy as np
 
+######################
+# ASHRAE INFORMATION #
+######################
+A1 = {
+    'dry_bulb_lower_degCelsius' : 15, 
+    'dry_bulb_upper_degCelsius' : 32,
+    'humdity_range_noncondensing'  : '-12d CP & 8% RH to 17 dC DP and 80% RH',
+    'relative_humdity_lower_%'  : 8, 
+    'relative_humdity_upper_%'  : 80,
+    'max_dew_point_celsius'  : 17, 
+    'maximum_elevation_m'  : 3050, 
+    'maximum_temperature_change_in_an_hour_degrees'  : '5/20'
+}
+
+A2 = {
+    'dry_bulb_lower_degCelsius'  : 10, 
+    'dry_bulb_upper_degCelsius'  : 35,
+    'humdity_range_noncondensing'  :  '-12d CP & 8% RH to 21 dC DP and 80% RH',
+    'relative_humdity_lower_%'  : 8, 
+    'relative_humdity_upper_%'  : 80,
+    'max_dew_point_celsius'  : 21, 
+    'maximum_elevation'  : 3050, 
+    'maximum_temperature_change_in_an_hour_degrees'  : '5/20'
+}
+
+A3 = {
+    'dry_bulb_lower_degCelsius'  : 5, 
+    'dry_bulb_upper_degCelsius'  : 40,
+    'humdity_range_noncondensing'  :  '-12d CP & 8% RH to 24 dC DP and 85% RH',
+    'relative_humdity_lower_%'  : 8, 
+    'relative_humdity_upper_%'  : 85,
+    'max_dew_point_celsius'  : 24, 
+    'maximum_elevation_m'  : 3050, 
+    'maximum_temperature_change_in_an_hour_degrees'  : '5/20'
+}
+
+A4 = {
+    'dry_bulb_lower_degCelsius'  : 5, 
+    'dry_bulb_upper_degCelsius'  : 45,
+    'humdity_range_noncondensing'  : '-12d CP & 8% RH to 24 dC DP and 90% RH',
+    'relative_humdity_lower_%'  : 8, 
+    'relative_humdity_upper_%'  : 90,
+    'max_dew_point_celsius'  : 24, 
+    'maximum_elevation_m'  : 3050, 
+    'maximum_temperature_change_in_an_hour_degrees'  : '5/20'
+}
+
 def process_region(raw_files_glob, thresh_file, out_dir, region_name):
     print(f"[{region_name}] Loading raw files and thresholds...")
     
@@ -171,6 +220,15 @@ def process_region(raw_files_glob, thresh_file, out_dir, region_name):
         join='override'        # <-- ADD THIS: Forces alignment without strict equality checks
     )
     
+    '''
+                data_vars={
+                'Tair': temp,
+                'Tair_min': temp_min,
+                'Tair_max': temp_max,
+                'Qair': humidity,
+                'PSurf': pressure,
+                'enthalpy': enthalpy
+    '''
     ds_thresh = xr.open_dataset(thresh_file)
     
     # 3. Add season string
@@ -200,20 +258,70 @@ def process_region(raw_files_glob, thresh_file, out_dir, region_name):
     # Seasonal
     ds['crossed_seasonal_cold'] = ds['enthalpy'] < ds['seasonal_enthalpy_thresholds'].sel(quantile=cold_quants)
     ds['crossed_seasonal_hot'] = ds['enthalpy'] > ds['seasonal_enthalpy_thresholds'].sel(quantile=hot_quants)
-    
+
+    # ### use 
+    # ds['crossed_a1'] = ds['enthalpy'] < ds['seasonal_enthalpy_thresholds'].sel(quantile=cold_quants)
+    # ds['crossed_a2'] = ds['enthalpy'] > ds['seasonal_enthalpy_thresholds'].sel(quantile=hot_quants)
+    # ds['crossed_a3'] = ds['enthalpy'] < ds['seasonal_enthalpy_thresholds'].sel(quantile=cold_quants)
+    # ds['crossed_a4'] = ds['enthalpy'] > ds['seasonal_enthalpy_thresholds'].sel(quantile=hot_quants)
+
     # NOTE: .astype(int) can sometimes throw warnings if there are NaNs. 
     # If enthalpy has NaNs (like over oceans), these booleans might evaluate weirdly. 
     # using .fillna(0).astype('int8') is often safer and uses less memory.
     for var in ['crossed_annual_cold', 'crossed_annual_hot', 'crossed_seasonal_cold', 'crossed_seasonal_hot']:
         ds[var] = ds[var].astype('int8')
 
+    print(f"[{region_name}] Executing physical ASHRAE environment checks...")
+    
+    # Standardize data inputs to metric
+    T_C = ds['Tair'] ## temperature is already in celsius 
+    T_min_C = ds['Tair_min']
+    P_kpa = ds['PSurf'] / 1000.0         # Pascals to kPa
+    q = ds['Qair']                       # kg/kg Specific Humidity
+    
+    # Saturation Vapor Pressure curve
+    p_ws = 0.61094 * np.exp(17.625 * T_C / (T_C + 243.04))
+    
+    # Actual Vapor Pressure grid
+    p_w_actual = (q * P_kpa) / (0.62198 + 0.37802 * q)
+    
+    # Constant minimum vapor pressure at hard -12°C Dew Point floor
+    p_w_dp_min = 0.61094 * np.exp(17.625 * -12.0 / (-12.0 + 243.04))
+    
+    ashrae_classes = {'a1': A1, 'A2': A2, 'A3': A3, 'A4': A4}
+    
+    for name, config in ashrae_classes.items():
+        # Temperature limits check
+        t_fail = (T_C < config['dry_bulb_lower_degCelsius']) | (T_C > config['dry_bulb_upper_degCelsius'])
+        
+        # Lower moisture limits check (-12C Dew Point vs shifting 8% RH limit)
+        p_w_rh_min = (config['relative_humdity_lower_%'] / 100.0) * p_ws
+        p_w_lower_limit = xr.where(p_w_dp_min > p_w_rh_min, p_w_dp_min, p_w_rh_min)
+        floor_fail = p_w_actual < p_w_lower_limit
+        
+        # Upper moisture limits check (Max Dew Point key vs shifting RH limit)
+        p_w_dp_max = 0.61094 * np.exp(17.625 * config['max_dew_point_celsius'] / (config['max_dew_point_celsius'] + 243.04))
+        p_w_rh_max = (config['relative_humdity_upper_%'] / 100.0) * p_ws
+        p_w_upper_limit = xr.where(p_w_dp_max < p_w_rh_max, p_w_dp_max, p_w_rh_max)
+        ceiling_fail = p_w_actual > p_w_upper_limit
+        
+        # Combine checks and convert to 1 (violation) and 0 (compliant)
+        ds[f'violation_{name}'] = (t_fail | floor_fail | ceiling_fail).astype(int)
+
     print(f"[{region_name}] Saving to Zarr format (Highly recommended for parallel writes)...")
     
-    # Save as Zarr directory instead of NetCDF
-    # E.g., out_dir = '/discover/nobackup/cmbreen/datacenters/virginia_enthalpy_stacked.zarr'
-    ds.to_zarr(out_dir, mode='w', consolidated=True)
+    # # Save as Zarr directory instead of NetCDF
+    # # E.g., out_dir = '/discover/nobackup/cmbreen/datacenters/virginia_enthalpy_stacked.zarr'
+    # ds.to_zarr(out_dir, mode='w', consolidated=True)
     
-    print(f"[{region_name}] Done!\n")
+    # print(f"[{region_name}] Done!\n")
+
+    print(f"[{region_name}] Saving to Zarr format...")
+    
+    # Add this line to unify chunking before saving
+    ds = ds.chunk({'time': 100, 'lat': 'auto', 'lon': 'auto'})
+    
+    ds.to_zarr(out_dir, mode='w', consolidated=True)
 
 def main():
     process_region(
