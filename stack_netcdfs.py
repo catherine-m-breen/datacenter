@@ -24,6 +24,7 @@ import matplotlib.pyplot as plt
 import tqdm
 import os
 import numpy as np
+import zarr 
 
 # virginia = '/discover/nobackup/cmbreen/datacenters/virginia/*.nc' ## 8400 files 
 # texas = '/discover/nobackup/cmbreen/datacenters/texas/*.nc' ## 8400 
