@@ -164,7 +164,10 @@ def process_region(raw_files_glob, thresh_file, out_dir, region_name):
         parallel=True, 
         engine='h5netcdf', 
         chunks={'time': 100},
-        data_vars='minimal' # Prevents merging non-dimension variables unnecessarily
+        data_vars='minimal', # Prevents merging non-dimension variables unnecessarily,
+        coords='minimal',      # <-- ADD THIS: Only read coordinates from the first file
+        compat='override',     # <-- ADD THIS: Ignores slight value conflicts between files
+        join='override'        # <-- ADD THIS: Forces alignment without strict equality checks
     )
     
     ds_thresh = xr.open_dataset(thresh_file)
@@ -224,7 +227,7 @@ def main():
     process_region(
         raw_files_glob='/discover/nobackup/cmbreen/datacenters/texas/*.nc',
         thresh_file='/discover/nobackup/cmbreen/datacenters/texas_enthalpy_quantiles.nc',
-        out_file='/discover/nobackup/cmbreen/datacenters/texas_enthalpy_stacked.zarr',
+        out_dir='/discover/nobackup/cmbreen/datacenters/texas_enthalpy_stacked.zarr',
         region_name='Texas'
     )
 
