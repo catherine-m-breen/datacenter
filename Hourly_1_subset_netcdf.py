@@ -107,7 +107,7 @@ if __name__ == "__main__":
     # VIRGINIA
     process_state_forcing(
         forcing_files=forcing_files,
-        output_dir='/discover/nobackup/cmbreen/datacenters/virginia',
+        output_dir='/discover/nobackup/cmbreen/datacenters/virginia_hourly',
         lat_slice=slice(38.5, 39.5),
         lon_slice=slice(-78, -77),
         prefix='va',
@@ -118,7 +118,7 @@ if __name__ == "__main__":
     # TEXAS
     process_state_forcing(
         forcing_files=forcing_files,
-        output_dir='/discover/nobackup/cmbreen/datacenters/texas',
+        output_dir='/discover/nobackup/cmbreen/datacenters/texas_hourly',
         lat_slice=slice(32.3, 33.3),
         lon_slice=slice(-97.5, -96.5),
         prefix='tx',
