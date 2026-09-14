@@ -8,7 +8,7 @@ def process_state_forcing(forcing_files, output_dir, lat_slice, lon_slice, prefi
     print(f"\nStitching together files for {prefix} ({tz_name})...")
     
     # 1. Open all daily files at once as one continuous timeline
-    ds = xr.open_mfdataset(forcing_files, combine='by_coords', parallel=True)
+    ds = xr.open_mfdataset(forcing_files, combine='by_coords', parallel=False)
     
     # 2. Subset spatially and load into memory for fast computation
     print(f"Subsetting spatially for {prefix}...")
