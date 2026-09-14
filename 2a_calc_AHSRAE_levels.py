@@ -27,7 +27,7 @@ A2 = {'dry_bulb_lower_degCelsius'  : 10,
 
 A3 = {'dry_bulb_lower_degCelsius'  : 5, 
       'dry_bulb_upper_degCelsius'  : 40,
-      'humdity_range_noncondensing'  :  '-12d CP & 8% RH to 24 dC DP and 85% RH',
+      'humdity_range_noncondensing'  :  '-12dC DP & 8% RH to 24 dC DP and 85% RH',
       'relative_humdity_lower_%'  : 8, 
       'relative_humdity_upper_%'  : 85,
       'max_dew_point_celsius'  : 24, 
@@ -35,14 +35,16 @@ A3 = {'dry_bulb_lower_degCelsius'  : 5,
       'maximum_temperature_change_in_an_hour_degrees'  : '5/20'
       }
 
-A4 = {'dry_bulb_lower_degCelsius'  :5, 
+A4 = {# power on
+      'dry_bulb_lower_degCelsius'  :5, 
       'dry_bulb_upper_degCelsius'  : 45,
-      'humdity_range_noncondensing'  : '-12d CP & 8% RH to 24 dC DP and 90% RH',
-        'relative_humdity_lower_%'  : 8, 
-      'relative_humdity_upper_%'  : 90,
+      'humdity_range_noncondensing'  : '-12dC DP & 8% RH to 24dC DP and 90% RH',
       'max_dew_point_celsius'  : 24, 
       'maximum_elevation_m'  : 3050, 
-      'maximum_temperature_change_in_an_hour_degrees'  :'5/20'
+      'maximum_temperature_change_in_an_hour_degrees'  :'5/20',
+      ## power off
+      'relative_humdity_lower_%'  : 8, 
+      'relative_humdity_upper_%'  : 80,
       }
 
 
