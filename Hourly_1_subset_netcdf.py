@@ -3,31 +3,27 @@ import pandas as pd
 import os
 import glob
 
-def process_state_forcing(forcing_files, output_dir, lat_slice, lon_slice, prefix, tz_name, utc_offset):
-    os.makedirs(output_dir, exist_ok=True)
-    print(f"\nStitching together files for {prefix} ({tz_name})...")
+def process_state_forcing_yearly(forcing_files, output_dir, lat_slice, lon_slice, prefix, tz_name, utc_offset, year):
+    print(f"  -> Processing {year} ({len(forcing_files)} files)...")
     
-    # NEW: Create a preprocess function to subset EACH file before stitching them together.
-    # This massively reduces memory usage and Dask graph complexity.
     def subset_spatial(ds_single):
         return ds_single.sel(lat=lat_slice, lon=lon_slice)
     
-    # 1. Open all daily files at once, preprocessing them on the fly
+    # 1. Open ONLY this year's files
+    # CRITICAL: parallel=False prevents HDF5 Segmentation Faults
     ds = xr.open_mfdataset(
         forcing_files, 
         combine='by_coords', 
-        preprocess=subset_spatial, # Subsets each file individually
-        join='override',           # Ignores slight lat/lon floating point mismatches
-        compat='override',         # Forces variable compatibility across all files
-        parallel=True              # Can speed up file reading if dask is available
+        preprocess=subset_spatial,
+        join='override',
+        compat='override',
+        parallel=False,  
+        engine='netcdf4'
     )
     
-    # 2. Load the pre-subsetted continuous timeline into memory
-    print(f"Loading spatial subset into memory for {prefix}...")
-    ds_nova = ds.load() 
-    # ds_nova = ds_nova.load()
+    # 2. Subset spatially and load into memory
+    ds_nova = ds.load()
     
-    print(f"Calculating Day/Night averages for {prefix}...")
     # Calculate derived variables
     temp = ds_nova['Tair'] - 273.15
     humidity = ds_nova['Qair']
@@ -44,22 +40,17 @@ def process_state_forcing(forcing_files, output_dir, lat_slice, lon_slice, prefi
     })
 
     # --- 1. TIMEZONE ADJUSTMENT ---
-    # Shift from UTC to strictly Standard Time (EST = -5, CST = -6)
     ds_derived['time'] = ds_derived['time'] + pd.Timedelta(hours=utc_offset)
     
     # --- 2. ALIGN CONTINUOUS NIGHTTIME CROSSING MIDNIGHT ---
-    # Shift timeline +6 hours so 6PM-6AM maps perfectly to hours 0-11 of the target date,
-    # and 6AM-6PM maps perfectly to hours 12-23 of the target date.
     ds_derived['time'] = ds_derived['time'] + pd.Timedelta(hours=6)
     
     # --- 3. SEPARATE DAY AND NIGHT ---
-    # Based on our shifted timeline, the Day starts at hour 12
     is_day = ds_derived.time.dt.hour >= 12
     ds_day = ds_derived.where(is_day)
     ds_night = ds_derived.where(~is_day)
     
     # --- 4. SUMMARIZE TO DAILY ---
-    # Resample now flawlessly captures the rolling night under the current calendar day
     day_mean = ds_day.resample(time='1D').mean()
     day_min  = ds_day.resample(time='1D').min()
     day_max  = ds_day.resample(time='1D').max()
@@ -88,37 +79,61 @@ def process_state_forcing(forcing_files, output_dir, lat_slice, lon_slice, prefi
     )
 
     # --- ADD METADATA ---
-    out_ds['DayTime_Avg_Tair'].attrs = {'units': 'Celsius', 'long_name': 'Daytime Average 2-m Air Temp'}
-    out_ds['DayTime_Tair_min'].attrs = {'units': 'Celsius', 'long_name': 'Daytime Minimum 2-m Air Temp'}
-    out_ds['DayTime_Tair_max'].attrs = {'units': 'Celsius', 'long_name': 'Daytime Maximum 2-m Air Temp'}
-    out_ds['DayTime_Avg_enthalpy'].attrs = {'units': 'kJ/kg', 'long_name': 'Daytime Average Enthalpy'}
-    
-    out_ds['NightTime_Avg_Tair'].attrs = {'units': 'Celsius', 'long_name': 'Nighttime Average 2-m Air Temp'}
-    out_ds['NightTime_Tair_min'].attrs = {'units': 'Celsius', 'long_name': 'Nighttime Minimum 2-m Air Temp'}
-    out_ds['NightTime_Tair_max'].attrs = {'units': 'Celsius', 'long_name': 'Nighttime Maximum 2-m Air Temp'}
-    out_ds['NightTime_Avg_enthalpy'].attrs = {'units': 'kJ/kg', 'long_name': 'Nighttime Average Enthalpy'}
+    out_ds['DayTime_Avg_Tair'].attrs = {'units': 'Celsius'}
+    out_ds['NightTime_Avg_Tair'].attrs = {'units': 'Celsius'}
 
-    out_ds.attrs = ds.attrs
-    out_ds.attrs['timezone_used'] = f'{tz_name} (UTC{utc_offset})'
-    out_ds.attrs['processing_note'] = f'Subsetted; Day=6AM-6PM, Night=6PM-6AM; Resampled to local {tz_name} daily summary.'
-
-    # Save ONE combined file per state
-    out_filename = os.path.join(output_dir, f"{prefix}_Daily_DayNight_Summary.nc")
-    print(f"Saving to {out_filename}...")
+    # Save intermediate yearly file
+    out_filename = os.path.join(output_dir, f"{prefix}_{year}_temp.nc")
     out_ds.to_netcdf(out_filename)
 
     ds.close()
     out_ds.close()
-    print("Done!")
+    return out_filename
+
+
+def process_state_full(base_path, output_dir, lat_slice, lon_slice, prefix, tz_name, utc_offset):
+    os.makedirs(output_dir, exist_ok=True)
+    print(f"\n--- Starting processing for {prefix.upper()} ({tz_name}) ---")
+    
+    # Find all year directories (e.g., /.../hourly/2000, 2001, etc.)
+    year_dirs = sorted(glob.glob(os.path.join(base_path, '2*')))
+    
+    yearly_files = []
+    
+    for y_dir in year_dirs:
+        year = os.path.basename(y_dir)
+        # Find all files for this specific year
+        forcing_files = sorted(glob.glob(os.path.join(y_dir, '*.nc')))
+        
+        if len(forcing_files) > 0:
+            temp_file = process_state_forcing_yearly(
+                forcing_files, output_dir, lat_slice, lon_slice, 
+                prefix, tz_name, utc_offset, year
+            )
+            yearly_files.append(temp_file)
+            
+    print(f"Stitching {len(yearly_files)} yearly files into final master file...")
+    # Open the ~20 intermediate files (perfectly safe and fast!)
+    ds_final = xr.open_mfdataset(yearly_files, combine='by_coords', parallel=False)
+    
+    final_out = os.path.join(output_dir, f"{prefix}_Daily_DayNight_Summary.nc")
+    ds_final.to_netcdf(final_out)
+    ds_final.close()
+    
+    # Clean up the intermediate yearly files
+    print("Cleaning up temporary yearly files...")
+    for f in yearly_files:
+        os.remove(f)
+        
+    print(f"Finished {prefix.upper()}! Saved to {final_out}")
+
 
 if __name__ == "__main__":
-    forcing_files = sorted(glob.glob('/discover/nobackup/projects/eis_nldas3/DATA/forcing/hourly/2*/*.nc'))
-    
-    print(f"Total files found: {len(forcing_files)}")
+    base_forcing_path = '/discover/nobackup/projects/eis_nldas3/DATA/forcing/hourly'
     
     # VIRGINIA
-    process_state_forcing(
-        forcing_files=forcing_files,
+    process_state_full(
+        base_path=base_forcing_path,
         output_dir='/discover/nobackup/cmbreen/datacenters/virginia_hourly',
         lat_slice=slice(38.5, 39.5),
         lon_slice=slice(-78, -77),
@@ -128,8 +143,8 @@ if __name__ == "__main__":
     )
     
     # TEXAS
-    process_state_forcing(
-        forcing_files=forcing_files,
+    process_state_full(
+        base_path=base_forcing_path,
         output_dir='/discover/nobackup/cmbreen/datacenters/texas_hourly',
         lat_slice=slice(32.3, 33.3),
         lon_slice=slice(-97.5, -96.5),
