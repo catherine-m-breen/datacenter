@@ -7,13 +7,25 @@ def process_state_forcing(forcing_files, output_dir, lat_slice, lon_slice, prefi
     os.makedirs(output_dir, exist_ok=True)
     print(f"\nStitching together files for {prefix} ({tz_name})...")
     
-    # 1. Open all daily files at once as one continuous timeline
-    ds = xr.open_mfdataset(forcing_files, combine='by_coords', parallel=False)
+    # NEW: Create a preprocess function to subset EACH file before stitching them together.
+    # This massively reduces memory usage and Dask graph complexity.
+    def subset_spatial(ds_single):
+        return ds_single.sel(lat=lat_slice, lon=lon_slice)
     
-    # 2. Subset spatially and load into memory for fast computation
-    print(f"Subsetting spatially for {prefix}...")
-    ds_nova = ds.sel(lat=lat_slice, lon=lon_slice)
-    ds_nova = ds_nova.load()
+    # 1. Open all daily files at once, preprocessing them on the fly
+    ds = xr.open_mfdataset(
+        forcing_files, 
+        combine='by_coords', 
+        preprocess=subset_spatial, # Subsets each file individually
+        join='override',           # Ignores slight lat/lon floating point mismatches
+        compat='override',         # Forces variable compatibility across all files
+        parallel=True              # Can speed up file reading if dask is available
+    )
+    
+    # 2. Load the pre-subsetted continuous timeline into memory
+    print(f"Loading spatial subset into memory for {prefix}...")
+    ds_nova = ds.load() 
+    # ds_nova = ds_nova.load()
     
     print(f"Calculating Day/Night averages for {prefix}...")
     # Calculate derived variables
