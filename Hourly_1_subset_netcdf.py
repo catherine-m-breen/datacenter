@@ -16,7 +16,7 @@ def process_state_forcing_yearly(forcing_files, output_dir, lat_slice, lon_slice
         combine='by_coords', 
         preprocess=subset_spatial,
         join='override',
-        compat='override',
+       # compat='override',
         parallel=False,  
         engine='netcdf4'
     )
