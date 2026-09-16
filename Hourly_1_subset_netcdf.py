@@ -114,7 +114,8 @@ def process_state_full(base_path, output_dir, lat_slice, lon_slice, prefix, tz_n
             
     print(f"Stitching {len(yearly_files)} yearly files into final master file...")
     # Open the ~20 intermediate files (perfectly safe and fast!)
-    ds_final = xr.open_mfdataset(yearly_files, combine='by_coords', join='override', parallel=False)
+    # ds_final = xr.open_mfdataset(yearly_files, combine='by_coords', join='override', parallel=False)
+    ds_final = xr.open_mfdataset(yearly_files, combine='nested', concat_dim='time', join='override', parallel=False)
     
     final_out = os.path.join(output_dir, f"{prefix}_Daily_DayNight_Summary.nc")
     ds_final.to_netcdf(final_out)
