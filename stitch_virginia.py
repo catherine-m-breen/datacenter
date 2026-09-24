@@ -38,8 +38,8 @@ def stitch_virginia():
     
     # Clean up the intermediate yearly files so your folder is clean
     print("Cleaning up temporary yearly files...")
-    for f in yearly_files:
-        os.remove(f)
+    # for f in yearly_files:
+    #     os.remove(f)
         
     print(f"Finished! Saved to {final_out}")
 
