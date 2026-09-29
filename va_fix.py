@@ -30,14 +30,15 @@ for f in hourly_files:
     
     datasets.append(ds_month)
 
-print("Concatenating files... (Applying override to prevent grid expansion)")
-ds_final = xr.concat(datasets, dim='time', join='override', compat='override')
+print("Concatenating files... (Applying join='override' to prevent grid expansion)")
+# REMOVED compat='override' - just join='override' is all you need!
+ds_final = xr.concat(datasets, dim='time', join='override')
 
 print("Sorting and deduplicating...")
 ds_final = ds_final.sortby('time')
 ds_final = ds_final.drop_duplicates(dim='time')
 
-# 3. VERIFICATION STEP (This will print to the screen so you can PROVE it worked)
+# 3. VERIFICATION STEP 
 print("\n--- SANITY CHECK BEFORE SAVING ---")
 print(f"Total hours in dataset: {ds_final.time.size}")
 print(f"First 5 dates: {ds_final.time.values[:5]}")
