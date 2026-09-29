@@ -19,7 +19,8 @@ for f in hourly_files:
     datasets.append(ds_month)
 
 print("Concatenating files... (Because they are real datetimes now, they won't overlap!)")
-ds_final = xr.concat(datasets, dim='time')
+#ds_final = xr.concat(datasets, dim='time')
+ds_final = xr.concat(datasets, dim='time', join='override', compat='override')
 ds_final = ds_final.sortby('time')
 ds_final = ds_final.drop_duplicates(dim='time')
 
