@@ -1,4 +1,5 @@
 import xarray as xr
+import pandas as pd
 import glob
 
 print("Finding Texas monthly files...")
@@ -7,25 +8,32 @@ print(f"Found {len(hourly_files)} monthly files to stitch.")
 
 datasets = []
 for f in hourly_files:
-    # 1. Open the file WITHOUT decoding the time to bypass the error
     ds_month = xr.open_dataset(f, decode_times=False)
     
-    # 2. Fix the broken 'T' in the units string
-    ds_month.time.attrs['units'] = ds_month.time.attrs['units'].replace('T', ' ')
+    # 1. Pandas datetime fix
+    units = ds_month.time.attrs['units']
+    base_time_str = units.split('since ')[1]
+    base_time = pd.to_datetime(base_time_str)
     
-    # 3. NOW tell Xarray to decode it. This turns [0, 1, 2...] into real datetimes!
-    ds_month = xr.decode_cf(ds_month)
+    real_times = base_time + pd.to_timedelta(ds_month.time.values, unit='h')
+    ds_month['time'] = real_times
     
+    ds_month.time.attrs.clear()
     datasets.append(ds_month)
 
-print("Concatenating files... (Because they are real datetimes now, they won't overlap!)")
-#ds_final = xr.concat(datasets, dim='time')
-ds_final = xr.concat(datasets, dim='time', join='override', compat='override')
+print("Concatenating files... (Applying join='override' to prevent grid expansion)")
+ds_final = xr.concat(datasets, dim='time', join='override')
+
+print("Sorting and deduplicating...")
 ds_final = ds_final.sortby('time')
 ds_final = ds_final.drop_duplicates(dim='time')
 
-# 4. Clear the old corrupted metadata so it writes a clean, standard NetCDF time format
-ds_final.time.encoding.clear()
+# 2. THE MAGIC FIX: Explicitly format the NetCDF time output
+ds_final.time.encoding = {
+    'units': 'hours since 2000-12-31 19:00:00',
+    'calendar': 'standard',
+    '_FillValue': None
+}
 
 final_out = '/discover/nobackup/cmbreen/datacenters/texas_pure_hourly/tx_Pure_Hourly_Summary_FIXED.nc'
 print(f"Saving fixed summary to {final_out}...")
