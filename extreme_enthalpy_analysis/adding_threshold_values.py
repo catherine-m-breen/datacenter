@@ -38,8 +38,8 @@ def enthalpy_threshold_values(path, output_path):
     print('done')
     return 
 
-output_path = '/discover/nobackup/datacenters/virginia_hourly/va_daynight_threshold.nc'
+output_path = '/discover/nobackup/cmbreen/datacenters/virginia_hourly/va_daynight_threshold.nc'
 va_ds = enthalpy_threshold_values(va_netcdf_path, output_path)
 
-output_path = '/discover/nobackup/datacenters/texas_hourly/tx_daynight_threshold.nc'
+output_path = '/discover/nobackup/cmbreen/datacenters/texas_hourly/tx_daynight_threshold.nc'
 tx_ts = enthalpy_threshold_values(tx_netcdf_path)
