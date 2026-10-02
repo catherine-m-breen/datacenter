@@ -331,15 +331,15 @@ def process_state_full(base_path, output_dir, lat_slice, lon_slice, prefix, tz_n
         
     print(f"Finished {prefix.upper()}! Saved to {final_out}")
 
-    if __name__ == "__main__":
-        base_forcing_path = '/discover/nobackup/projects/eis_nldas3/DATA/forcing/hourly'
-            # # TEXAS
-        process_state_full(
-            base_path=base_forcing_path,
-            output_dir='/discover/nobackup/cmbreen/datacenters/texas_hourly',
-            lat_slice=slice(32.3, 33.3),
-            lon_slice=slice(-97.5, -96.5),
-            prefix='tx',
-            tz_name='Central Standard Time',
-            utc_offset=-6
-            )
+if __name__ == "__main__":
+    base_forcing_path = '/discover/nobackup/projects/eis_nldas3/DATA/forcing/hourly'
+        # # TEXAS
+    process_state_full(
+        base_path=base_forcing_path,
+        output_dir='/discover/nobackup/cmbreen/datacenters/texas_hourly',
+        lat_slice=slice(32.3, 33.3),
+        lon_slice=slice(-97.5, -96.5),
+        prefix='tx',
+        tz_name='Central Standard Time',
+        utc_offset=-6
+        )
