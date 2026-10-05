@@ -269,11 +269,11 @@ def generate_master_panel(pdf, dc_id, target_date, df, state_abb):
     """Creates a 16:9 master panel with 4 quadrants + Stats Table."""
     if state_abb == 'VA':
         daily_nc = '/discover/nobackup/cmbreen/datacenters/virginia_hourly/va_Daily_DayNight_Summary.nc'
-        hourly_nc = '/discover/nobackup/cmbreen/datacenters/virginia_hourly/va_hourly_data.nc'
+        hourly_nc = '/discover/nobackup/cmbreen/datacenters/virginia_pure_hourly/va_Pure_Hourly_Summary_FIXED.nc'
         thresh_nc = '/discover/nobackup/cmbreen/datacenters/virginia_hourly/va_daynight_threshold.nc'
     else:
         daily_nc = '/discover/nobackup/cmbreen/datacenters/texas_hourly/tx_Daily_DayNight_Summary.nc'
-        hourly_nc = '/discover/nobackup/cmbreen/datacenters/texas_hourly/tx_hourly_data.nc'
+        hourly_nc = '/discover/nobackup/cmbreen/datacenters/texas_pure_hourly/tx_Pure_Hourly_Summary_FIXED.nc'
         thresh_nc = '/discover/nobackup/cmbreen/datacenters/texas_hourly/tx_daynight_threshold.nc'
 
     fig = plt.figure(figsize=(16, 9), dpi=150)
@@ -302,11 +302,17 @@ def generate_master_panel(pdf, dc_id, target_date, df, state_abb):
     d_val = f"{stats['day_val']:.1f}" if np.isfinite(stats['day_val']) else "N/A"
     n_val = f"{stats['night_val']:.1f}" if np.isfinite(stats['night_val']) else "N/A"
     
+    # Calculate Average Hours per Event (avoiding division by zero)
+    d_avg = f"{stats['day_hours'] / stats['day_cross']:.1f}" if stats['day_cross'] > 0 else "0.0"
+    n_avg = f"{stats['night_hours'] / stats['night_cross']:.1f}" if stats['night_cross'] > 0 else "0.0"
+    
     table_data = [
-        ['Daytime', d_val, str(stats['day_cross']), str(stats['day_hours'])],
-        ['Nighttime', n_val, str(stats['night_cross']), str(stats['night_hours'])]
+        ['Daytime', d_val, str(stats['day_cross']), str(stats['day_hours']), d_avg],
+        ['Nighttime', n_val, str(stats['night_cross']), str(stats['night_hours']), n_avg]
     ]
-    col_labels = ['Threshold (90th Pct)', 'Value (kJ/kg)', 'Events (Crossings)', 'Total Hours Exceeded']
+    
+    # Updated Headers to accommodate the new metric
+    col_labels = ['Period', 'Threshold (kJ/kg)', 'Events (Crossings)', 'Total Hours Exceeded', 'Avg Hours / Event']
     
     ax_table.set_title("14-Day Pre-Event Threshold Summary", fontsize=10, fontweight='bold', pad=5)
     table = ax_table.table(cellText=table_data, colLabels=col_labels, loc='center', cellLoc='center', bbox=[0, 0, 1, 1])
