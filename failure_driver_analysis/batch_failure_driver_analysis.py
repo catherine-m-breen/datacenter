@@ -313,7 +313,7 @@ def generate_master_panel(pdf, dc_id, target_date, df, state_abb):
     
     # Updated Headers to accommodate the new metric
     col_labels = ['Period', 'Threshold (kJ/kg)', 'Events (Crossings)', 'Total Hours Exceeded', 'Avg Hours / Event']
-    
+
     ax_table.set_title("14-Day Pre-Event Threshold Summary", fontsize=10, fontweight='bold', pad=5)
     table = ax_table.table(cellText=table_data, colLabels=col_labels, loc='center', cellLoc='center', bbox=[0, 0, 1, 1])
     table.auto_set_font_size(False)
@@ -381,8 +381,11 @@ if __name__ == "__main__":
     for event in target_events:
         event_date, event_state, event_desc = event["date"], event["state"], event["desc"]
         dc_list = va_ids if event_state == 'VA' else tx_ids
-        
-        output_pdf = f"Datacenter_Panels_{event_state}_{event_date}_{event_desc}.pdf"
+
+        # Put whatever path you want here
+        output_dir = "/discover/nobackup/cmbreen/datacenters/output_pdfs/" 
+        output_pdf = f"{output_dir}Datacenter_Panels_{event_state}_{event_date}_{event_desc}.pdf"
+        #output_pdf = f"Datacenter_Panels_{event_state}_{event_date}_{event_desc}.pdf"
         print(f"\n{'='*50}\nCreating {output_pdf} ({len(dc_list)} pages)\n{'='*50}")
         
         with PdfPages(output_pdf) as pdf:
