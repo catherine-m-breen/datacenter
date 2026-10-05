@@ -184,19 +184,34 @@ def plot_rh_seasonal_envelope(axes, nc_path, target_date_str, dc_id, df):
     if dc_info.empty: return
     
     ds = xr.open_dataset(nc_path)
-    point_ds = ds.sel(lat=dc_info['lat'].values[0], lon=dc_info['lon'].values[0], method='nearest')
-    ds_season = point_ds.isel(time=(point_ds['time'].dt.season == season_code))
     
-    day_t, day_q, day_p = ds_season['DayTime_Avg_Tair'].values, ds_season['DayTime_Avg_Qair'].values, ds_season['DayTime_Avg_PSurf'].values
-    night_t, night_q, night_p = ds_season['NightTime_Avg_Tair'].values, ds_season['NightTime_Avg_Qair'].values, ds_season['NightTime_Avg_PSurf'].values
+    # ====================================================================
+    # 1. THE BACKGROUND (Static): Use ALL pixels in the state for the season
+    # ====================================================================
+    ds_season = ds.isel(time=(ds['time'].dt.season == season_code))
+    
+    # Flattening combines all times AND all locations into one massive, static distribution
+    day_t = ds_season['DayTime_Avg_Tair'].values.flatten()
+    day_q = ds_season['DayTime_Avg_Qair'].values.flatten()
+    day_p = ds_season['DayTime_Avg_PSurf'].values.flatten()
+    
+    night_t = ds_season['NightTime_Avg_Tair'].values.flatten()
+    night_q = ds_season['NightTime_Avg_Qair'].values.flatten()
+    night_p = ds_season['NightTime_Avg_PSurf'].values.flatten()
 
+    # ====================================================================
+    # 2. THE PURPLE DOT (Moving): Specific Datacenter, Specific Day
+    # ====================================================================
+    point_ds = ds.sel(lat=dc_info['lat'].values[0], lon=dc_info['lon'].values[0], method='nearest')
+    
     try:
         tgt_ds = point_ds.sel(time=target_date_str)
         found_target, tgt_day_t = True, tgt_ds['DayTime_Avg_Tair'].item()
         tgt_day_rh = calc_rh(tgt_day_t, tgt_ds['DayTime_Avg_Qair'].item(), tgt_ds['DayTime_Avg_PSurf'].item())
         tgt_night_t = tgt_ds['NightTime_Avg_Tair'].item()
         tgt_night_rh = calc_rh(tgt_night_t, tgt_ds['NightTime_Avg_Qair'].item(), tgt_ds['NightTime_Avg_PSurf'].item())
-    except: found_target = False
+    except: 
+        found_target = False
 
     ashrae_classes = [
         {'name': 'A4', 't': (5, 45), 'rh': (8, 90), 'dp': (-12, 24), 'color': 'lightgreen', 'alpha': 0.05},
@@ -207,23 +222,30 @@ def plot_rh_seasonal_envelope(axes, nc_path, target_date_str, dc_id, df):
 
     def format_panel(ax, t_data, rh_data, title):
         valid = np.isfinite(t_data) & np.isfinite(rh_data)
-        ax.hist2d(t_data[valid], rh_data[valid], bins=[50, 50], range=[[-15, 50], [0, 100]], cmap='inferno', cmin=1, alpha=0.9, zorder=1)
+        # Using rasterized=True to keep PDF sizes manageable since we are using flattened data!
+        ax.hist2d(t_data[valid], rh_data[valid], bins=[50, 50], range=[[-15, 50], [0, 100]], cmap='inferno', cmin=1, alpha=0.9, zorder=1, rasterized=True)
+        
         for ac in ashrae_classes:
             t_grid, b_bnd, t_bnd = get_ashrae_bounds(*ac['t'], *ac['rh'], *ac['dp'])
             ax.fill_between(t_grid, b_bnd, t_bnd, color=ac['color'], alpha=ac['alpha'], zorder=2)
             ax.plot(t_grid, t_bnd, color=ac['color'], linewidth=1, zorder=3)
             ax.plot(t_grid, b_bnd, color=ac['color'], linewidth=1, zorder=3)
+            
         ax.set_title(title, fontsize=12, fontweight='bold')
-        ax.set_xlim(-15, 50); ax.set_ylim(0, 100); ax.grid(alpha=0.3, linestyle='--')
+        ax.set_xlim(-15, 50)
+        ax.set_ylim(0, 100)
+        ax.grid(alpha=0.3, linestyle='--')
         ax.text(30, 15, 'A1', color='darkgreen', fontsize=7, fontweight='bold')
 
-    format_panel(ax1, day_t, calc_rh(day_t, day_q, day_p), "ASHRAE (Daytime)")
-    ax1.set_xlabel('Temp (°C)', fontsize=9); ax1.set_ylabel('Relative Humidity (%)', fontsize=9)
+    format_panel(ax1, day_t, calc_rh(day_t, day_q, day_p), "ASHRAE (Daytime - Statewide Norm)")
+    ax1.set_xlabel('Temp (°C)', fontsize=9)
+    ax1.set_ylabel('Relative Humidity (%)', fontsize=9)
     if found_target: ax1.scatter(tgt_day_t, tgt_day_rh, color='#9f00ff', s=150, marker='*', zorder=5)
 
-    format_panel(ax2, night_t, calc_rh(night_t, night_q, night_p), "ASHRAE (Nighttime)")
+    format_panel(ax2, night_t, calc_rh(night_t, night_q, night_p), "ASHRAE (Nighttime - Statewide Norm)")
     ax2.set_xlabel('Temp (°C)', fontsize=9)
     if found_target: ax2.scatter(tgt_night_t, tgt_night_rh, color='#9f00ff', s=150, marker='*', zorder=5)
+    
     ds.close()
 
 # ==========================================
