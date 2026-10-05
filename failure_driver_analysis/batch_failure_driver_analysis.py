@@ -87,7 +87,7 @@ def plot_failure_event_with_baselines(axes, ds_path, thresh_path, target_date_st
     day_thresh_val = monthly_thresh.DayTime_Avg_enthalpy_thresholds.values
     night_thresh_val = monthly_thresh.NightTime_Avg_enthalpy_thresholds.values
 
-    # Temp
+   # Temp
     ax1.plot(times, event_data.DayTime_Avg_Tair, label='Day Avg', color='darkorange', linewidth=2)
     ax1.plot(times, event_data.DayTime_Tair_max, label='Day Max', color='firebrick', linestyle='--', alpha=0.4)
     ax1.plot(times, event_data.NightTime_Avg_Tair, label='Night Avg', color='purple', linewidth=2)
@@ -95,6 +95,8 @@ def plot_failure_event_with_baselines(axes, ds_path, thresh_path, target_date_st
     ax1.set_ylabel('Temp (°C)', fontsize=9)
     ax1.set_title('Daily Build-up (14 Days Prior)', fontsize=12, fontweight='bold')
     ax1.legend(loc='upper left', ncol=2, fontsize=7)
+    ax1.set_ylim(10, 40)
+    ax1.set_xlim(times[0], times[-1]) # Locks X-axis tight to the data window
     ax1.grid(True, alpha=0.3)
 
     # Enthalpy
@@ -104,12 +106,14 @@ def plot_failure_event_with_baselines(axes, ds_path, thresh_path, target_date_st
     ax2.plot(times, event_data.NightTime_Avg_enthalpy, color='purple', linewidth=2)
     ax2.set_ylabel('Enthalpy (kJ/kg)', fontsize=9)
     ax2.legend(loc='upper left', ncol=2, fontsize=7)
+    ax2.set_ylim(20, 80)
     ax2.grid(True, alpha=0.3)
 
     # Humidity
     ax3.plot(times, event_data.DayTime_Avg_Qair, color='darkorange', linewidth=2)
     ax3.plot(times, event_data.NightTime_Avg_Qair, color='purple', linewidth=2)
     ax3.set_ylabel('Qair (kg/kg)', fontsize=9)
+    ax3.set_ylim(0.005, 0.02) # Fixed typo: assumed 0.005 instead of 0.05
     ax3.grid(True, alpha=0.3)
 
     for ax in axes:
