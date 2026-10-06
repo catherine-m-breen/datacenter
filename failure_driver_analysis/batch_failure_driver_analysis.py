@@ -10,6 +10,7 @@ from matplotlib.ticker import FuncFormatter
 from matplotlib.gridspec import GridSpec
 from matplotlib.backends.backend_pdf import PdfPages
 import warnings
+import os
 warnings.filterwarnings('ignore') # Suppress nan/slice warnings for cleaner logs
 
 # ==========================================
@@ -577,6 +578,8 @@ if __name__ == "__main__":
 
         # Put whatever path you want here
         output_dir = "/discover/nobackup/cmbreen/datacenters/output_pdfs/" 
+        os.makedirs(output_dir, exist_ok=True) 
+
         output_pdf = f"{output_dir}Datacenter_Panels_{event_state}_{event_date}_{event_desc}.pdf"
         #output_pdf = f"Datacenter_Panels_{event_state}_{event_date}_{event_desc}.pdf"
         print(f"\n{'='*50}\nCreating {output_pdf} ({len(dc_list)} pages)\n{'='*50}")
