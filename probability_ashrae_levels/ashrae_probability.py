@@ -80,14 +80,10 @@ def extract_state_data(nc_path, df, state_abb, is_aws_only=False):
     lons = xr.DataArray(region_df['lon'].values, dims='datacenter')
 
     with xr.open_dataset(nc_path) as ds:
-        # Interpolate to fix any missing "1st of the month" days
-        # ds_dc = ds.sel(lat=lats, lon=lons, method='nearest').interpolate_na(dim='time', method='linear').load()
         ds_dc = ds.sel(lat=lats, lon=lons, method='nearest')
-        
-        # 2. Defensively drop any duplicate time indices before interpolating
+        # Defensively drop any duplicate time indices before interpolating
         ds_dc = ds_dc.drop_duplicates(dim='time')
-        
-        # 3. Interpolate and load into memory
+        # Interpolate and load into memory
         ds_dc = ds_dc.interpolate_na(dim='time', method='linear').load()
         
     return ds_dc
@@ -98,6 +94,8 @@ def extract_state_data(nc_path, df, state_abb, is_aws_only=False):
 def create_state_page(pdf, ds_dc, state_name):
     print(f"Generating PDF page for {state_name}...")
     fig = plt.figure(figsize=(24, 16), dpi=150)
+    
+    # Leave slightly more space on the right (wspace) for the colorbar
     gs = GridSpec(3, 4, figure=fig, height_ratios=[1, 1, 0.4], hspace=0.3, wspace=0.15)
     
     fig.suptitle(f"{state_name} Datacenters: Seasonal Psychrometric Analysis", fontsize=24, fontweight='bold', y=0.95)
@@ -106,14 +104,13 @@ def create_state_page(pdf, ds_dc, state_name):
     season_names = ['Winter (DJF)', 'Spring (MAM)', 'Summer (JJA)', 'Fall (SON)']
     periods = [('Daytime', 'DayTime_Avg'), ('Nighttime', 'NightTime_Avg')]
     
-    table_data = []
+    # Step 3a: Pre-calculate the data and find the MAXIMUM frequency across ALL panels.
+    # This ensures our single colorbar perfectly maps across every season uniformly.
+    panel_data = {}
+    global_vmax = 1
     
-    # Generate 2x4 Heatmaps
     for row_idx, (p_name, p_prefix) in enumerate(periods):
         for col_idx, season in enumerate(seasons):
-            ax = fig.add_subplot(gs[row_idx, col_idx])
-            
-            # Extract specific season and time of day
             ds_season = ds_dc.where(ds_dc['time'].dt.season == season, drop=True)
             t_raw = ds_season[f'{p_prefix}_Tair'].values.flatten()
             q_raw = ds_season[f'{p_prefix}_Qair'].values.flatten()
@@ -123,8 +120,29 @@ def create_state_page(pdf, ds_dc, state_name):
             t, q, p_s = t_raw[valid], q_raw[valid], p_raw[valid]
             rh = get_rh(t, q, p_s)
             
-            # Plot Heatmap
-            ax.hist2d(t, rh, bins=[80, 80], range=[[-15, 50], [0, 100]], cmap='inferno', cmin=1, alpha=0.9)
+            panel_data[(row_idx, col_idx)] = (t, q, p_s, rh)
+            
+            # Find the max density block for this panel
+            counts, _, _ = np.histogram2d(t, rh, bins=[80, 80], range=[[-15, 50], [0, 100]])
+            if counts.max() > global_vmax:
+                global_vmax = counts.max()
+
+    # Step 3b: Plot the heatmaps and ASHRAE envelopes
+    table_data = []
+    heatmap_axes = []
+    
+    for row_idx, (p_name, p_prefix) in enumerate(periods):
+        for col_idx, season in enumerate(seasons):
+            ax = fig.add_subplot(gs[row_idx, col_idx])
+            heatmap_axes.append(ax)
+            
+            t, q, p_s, rh = panel_data[(row_idx, col_idx)]
+            
+            # Plot Heatmap USING our calculated global_vmax so all scales match
+            counts, xedges, yedges, im = ax.hist2d(
+                t, rh, bins=[80, 80], range=[[-15, 50], [0, 100]], 
+                cmap='inferno', cmin=1, vmax=global_vmax, alpha=0.9
+            )
             
             # Draw all 4 ASHRAE Envelopes stacked
             for ac in ASHRAE_CLASSES:
@@ -155,7 +173,12 @@ def create_state_page(pdf, ds_dc, state_name):
                 
             table_data.append([p_name, season_names[col_idx]] + probs)
 
-    # Generate Probability Table in the bottom row spanning all columns
+    # Add shared Colorbar spanning the height of the heatmaps
+    cbar = fig.colorbar(im, ax=heatmap_axes, shrink=0.8, aspect=30, pad=0.02)
+    cbar.set_label('Frequency of Occurrence', fontsize=14, fontweight='bold')
+    cbar.ax.tick_params(labelsize=12)
+
+    # Step 3c: Generate Probability Table
     ax_table = fig.add_subplot(gs[2, :])
     ax_table.axis('off')
     
