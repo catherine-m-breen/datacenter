@@ -424,7 +424,7 @@ def plot_rh_seasonal_envelope(axes, nc_path, target_date_str, dc_id, df):
 # ==========================================
 
 def compute_threshold_stats(hourly_path, thresh_path, target_date_str, dc_lat, dc_lon):
-    """Calculates crossings and total hours above threshold for the 14 days strictly prior to the event."""
+    """Calculates crossings, total hours, and the max hourly enthalpy jump strictly prior to the event."""
     target_date = pd.to_datetime(target_date_str)
     start_date = target_date - pd.Timedelta(days=14)
     # Stop calculating 1 hour before the event day begins
@@ -445,6 +445,10 @@ def compute_threshold_stats(hourly_path, thresh_path, target_date_str, dc_lat, d
     stats = {'day_val': day_t, 'night_val': night_t, 'day_hours': 0, 'day_cross': 0, 'night_hours': 0, 'night_cross': 0}
     
     if len(enth) > 0:
+        # NEW: Calculate the maximum positive hour-over-hour jump in enthalpy
+        enth_diff = np.diff(enth)
+        stats['max_hourly_jump'] = float(np.max(enth_diff)) if len(enth_diff) > 0 else 0.0
+
         for thresh, prefix in [(day_t, 'day'), (night_t, 'night')]:
             above = (enth > thresh).astype(int)
             stats[f'{prefix}_hours'] = int(np.sum(above))
@@ -456,6 +460,7 @@ def compute_threshold_stats(hourly_path, thresh_path, target_date_str, dc_lat, d
             
     ds_hourly.close(); ds_thresh.close()
     return stats
+
 
 
 # ==========================================
@@ -480,13 +485,29 @@ def generate_master_panel(pdf, dc_id, target_date, df, state_abb):
     fig.suptitle(f"Datacenter Operations Dashboard | ID: {dc_id} ({operator}) | Target Date: {target_date}", 
                  fontsize=18, fontweight='bold', y=0.96)
 
+    # # ----------------------------------------------------
+    # # Quadrant 1 (Top Left): Map & Table
+    # # ----------------------------------------------------
+    # # Sub-grid to stack Map on top and Table on bottom
+    # gs_left = gs[0, 0].subgridspec(2, 1, height_ratios=[2.5, 1], hspace=0.4)
+    # ax_map = fig.add_subplot(gs_left[0, 0])
+    # ax_table = fig.add_subplot(gs_left[1, 0])
+    # ax_table.axis('off')
+    
+    # plot_datacenter_heat_map_tx(ax_map, dc_id, target_date, df, daily_nc)
+
     # ----------------------------------------------------
     # Quadrant 1 (Top Left): Map & Table
     # ----------------------------------------------------
-    # Sub-grid to stack Map on top and Table on bottom
-    gs_left = gs[0, 0].subgridspec(2, 1, height_ratios=[2.5, 1], hspace=0.4)
+    # Sub-grid: 2 rows, 2 columns. 
+    # width_ratios=[0.85, 0.15] gives the map 85% of the width, leaving 15% empty on the right.
+    gs_left = gs[0, 0].subgridspec(2, 2, height_ratios=[2.5, 1], width_ratios=[0.85, 0.15], hspace=0.4)
+    
+    # Map goes in row 0, col 0 (leaving col 1 empty as a buffer for the colorbar)
     ax_map = fig.add_subplot(gs_left[0, 0])
-    ax_table = fig.add_subplot(gs_left[1, 0])
+    
+    # Table goes in row 1, but uses ":" to span across BOTH columns so it stays centered
+    ax_table = fig.add_subplot(gs_left[1, :])
     ax_table.axis('off')
     
     plot_datacenter_heat_map_tx(ax_map, dc_id, target_date, df, daily_nc)
@@ -511,7 +532,9 @@ def generate_master_panel(pdf, dc_id, target_date, df, state_abb):
     # Updated Headers to accommodate the new metric
     col_labels = ['Period', 'Threshold \n (kJ/kg)', 'Events \n (Crossings)', 'Total Hours \n Exceeded', 'Avg Hours / \n Event']
 
-    ax_table.set_title("14-Day Pre-Event Threshold Summary", fontsize=10, fontweight='bold', pad=5)
+    max_surge = stats.get('max_hourly_jump', 0.0)
+    ax_table.set_title(f"14-Day Pre-Event Summary (Max Hourly Surge: +{max_surge:.1f} kJ/kg)", 
+                       fontsize=10, fontweight='bold', pad=5)
     table = ax_table.table(cellText=table_data, colLabels=col_labels, loc='center', cellLoc='center', bbox=[0, 0, 1, 1])
     table.auto_set_font_size(False)
     table.set_fontsize(9)
@@ -561,13 +584,34 @@ def generate_master_panel(pdf, dc_id, target_date, df, state_abb):
 if __name__ == "__main__":
     df = pd.read_csv('~/INNOVATE/im3_open_source_data_center_atlas_v2026.02.09.csv')
     
+    # ------------------------------------------------------------------
+    # NEW: Filter Texas datacenters based on NetCDF spatial boundaries
+    # ------------------------------------------------------------------
+    tx_daily_nc = '/discover/nobackup/cmbreen/datacenters/texas_hourly/tx_Daily_DayNight_Summary.nc'
+    
+    # Open the TX NetCDF to grab the bounding box
+    with xr.open_dataset(tx_daily_nc) as ds_tx:
+        tx_min_lat, tx_max_lat = ds_tx.lat.min().item(), ds_tx.lat.max().item()
+        tx_min_lon, tx_max_lon = ds_tx.lon.min().item(), ds_tx.lon.max().item()
+    
+    # Filter the DataFrame to ONLY include TX datacenters inside these bounds
+    tx_df = df[
+        (df['state_abb'] == 'TX') & 
+        (df['lat'] >= tx_min_lat) & (df['lat'] <= tx_max_lat) & 
+        (df['lon'] >= tx_min_lon) & (df['lon'] <= tx_max_lon)
+    ]
+    tx_ids = tx_df['id'].tolist()
+    
+    print(f"Loaded {len(tx_ids)} Texas datacenters within NetCDF bounds.")
+
+    # Virginia AWS Datacenters
     aws_ops = ['Amazon Web Services', 'AWS', 'Amazon']
     va_ids = df[(df['state_abb'] == 'VA') & (df['operator'].isin(aws_ops))]['id'].tolist()
-    tx_ids = df[df['state_abb'] == 'TX']['id'].tolist()
 
+    # REMOVED San Antonio event per your request
     target_events = [
         {"date": "2012-06-29", "state": "VA", "desc": "AWS_us-east-1"},
-        {"date": "2018-09-04", "state": "TX", "desc": "San_Antonio_NA"},
+        # {"date": "2018-09-04", "state": "TX", "desc": "San_Antonio_NA"},
         {"date": "2023-07-31", "state": "TX", "desc": "First_Major_Peak"},
         {"date": "2023-08-10", "state": "TX", "desc": "Summer_2023_Peak"},
         {"date": "2023-08-17", "state": "TX", "desc": "Late_Aug_Heatwave_1"},
@@ -579,12 +623,10 @@ if __name__ == "__main__":
         event_date, event_state, event_desc = event["date"], event["state"], event["desc"]
         dc_list = va_ids if event_state == 'VA' else tx_ids
 
-        # Put whatever path you want here
         output_dir = "/discover/nobackup/cmbreen/datacenters/output_pdfs/" 
         os.makedirs(output_dir, exist_ok=True) 
 
         output_pdf = f"{output_dir}Datacenter_Panels_{event_state}_{event_date}_{event_desc}.pdf"
-        #output_pdf = f"Datacenter_Panels_{event_state}_{event_date}_{event_desc}.pdf"
         print(f"\n{'='*50}\nCreating {output_pdf} ({len(dc_list)} pages)\n{'='*50}")
         
         with PdfPages(output_pdf) as pdf:
