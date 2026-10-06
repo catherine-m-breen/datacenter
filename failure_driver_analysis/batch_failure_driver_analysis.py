@@ -398,6 +398,11 @@ def plot_rh_seasonal_envelope(axes, nc_path, target_date_str, dc_id, df):
             ax.fill_between(t_grid, b_bnd, t_bnd, color=ac['color'], alpha=ac['alpha'], zorder=2)
             ax.plot(t_grid, t_bnd, color=ac['color'], linewidth=1, zorder=3)
             ax.plot(t_grid, b_bnd, color=ac['color'], linewidth=1, zorder=3)
+
+            ## vertical lines
+            ax.plot([t_grid[0], t_grid[0]], [b_bnd[0], t_bnd[0]], color=ac['color'], linewidth=1.5, zorder=3)
+            ax.plot([t_grid[-1], t_grid[-1]], [b_bnd[-1], t_bnd[-1]], color=ac['color'], linewidth=1.5, zorder=3)
+            
             
         ax.set_title(title, fontsize=12, fontweight='bold')
         ax.set_xlim(-15, 50)
