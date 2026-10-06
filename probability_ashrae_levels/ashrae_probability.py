@@ -81,7 +81,14 @@ def extract_state_data(nc_path, df, state_abb, is_aws_only=False):
 
     with xr.open_dataset(nc_path) as ds:
         # Interpolate to fix any missing "1st of the month" days
-        ds_dc = ds.sel(lat=lats, lon=lons, method='nearest').interpolate_na(dim='time', method='linear').load()
+        # ds_dc = ds.sel(lat=lats, lon=lons, method='nearest').interpolate_na(dim='time', method='linear').load()
+        ds_dc = ds.sel(lat=lats, lon=lons, method='nearest')
+        
+        # 2. Defensively drop any duplicate time indices before interpolating
+        ds_dc = ds_dc.drop_duplicates(dim='time')
+        
+        # 3. Interpolate and load into memory
+        ds_dc = ds_dc.interpolate_na(dim='time', method='linear').load()
         
     return ds_dc
 
