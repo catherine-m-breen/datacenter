@@ -143,7 +143,7 @@ def plot_failure_event_with_baselines(axes, ds_path, thresh_path, target_date_st
     ax1.set_ylabel('Temp (°C)', fontsize=9)
     ax1.set_title('Daily Build-up (14 Days Prior)', fontsize=12, fontweight='bold')
     ax1.legend(loc='upper left', ncol=2, fontsize=7)
-    ax1.set_ylim(10, 40)
+    ax1.set_ylim(10, 50)
     ax1.set_xlim(times[0], times[-1]) # Locks X-axis tight to the data window
     ax1.grid(True, alpha=0.3)
 
@@ -153,7 +153,7 @@ def plot_failure_event_with_baselines(axes, ds_path, thresh_path, target_date_st
     ax2.plot(times, event_data.DayTime_Avg_enthalpy, color='darkorange', linewidth=2)
     ax2.plot(times, event_data.NightTime_Avg_enthalpy, color='purple', linewidth=2)
     ax2.set_ylabel('Enthalpy (kJ/kg)', fontsize=9)
-    ax2.legend(loc='upper left', ncol=2, fontsize=7)
+    ax2.legend(loc='upper left', ncol=1, fontsize=7)
     ax2.set_ylim(20, 80)
     ax2.grid(True, alpha=0.3)
 
@@ -193,7 +193,7 @@ def plot_hourly_failure_event(axes, hourly_path, thresh_path, target_date_str, d
     ax1.plot(times, event_data.Tair_C, color=line_color, linewidth=1.5)
     ax1.set_ylabel('Temp (°C)', fontsize=9)
     ax1.set_title('Hourly Fluctuations (14 Days Prior)', fontsize=12, fontweight='bold')
-    ax1.set_ylim(10, 40)
+    ax1.set_ylim(10, 50)
     ax1.grid(True, alpha=0.3)
 
     ax2.plot(times, event_data.enthalpy, color=line_color, linewidth=1.5)
@@ -475,11 +475,11 @@ def compute_threshold_stats(hourly_path, thresh_path, target_date_str, dc_lat, d
 def generate_master_panel(pdf, dc_id, target_date, df, state_abb):
     """Creates a 16:9 master panel with 4 quadrants + Stats Table."""
     if state_abb == 'VA':
-        daily_nc = '/discover/nobackup/cmbreen/datacenters/virginia_hourly/va_Daily_DayNight_Summary.nc'
+        daily_nc = '/discover/nobackup/cmbreen/datacenters/virginia_hourly/va_Daily_DayNight_Summary_CORRECTED.nc'
         hourly_nc = '/discover/nobackup/cmbreen/datacenters/virginia_pure_hourly/va_Pure_Hourly_Summary_FIXED.nc'
         thresh_nc = '/discover/nobackup/cmbreen/datacenters/virginia_hourly/va_daynight_threshold.nc'
     else:
-        daily_nc = '/discover/nobackup/cmbreen/datacenters/texas_hourly/tx_Daily_DayNight_Summary.nc'
+        daily_nc = '/discover/nobackup/cmbreen/datacenters/texas_hourly/tx_Daily_DayNight_Summary_CORRECTED.nc'
         hourly_nc = '/discover/nobackup/cmbreen/datacenters/texas_pure_hourly/tx_Pure_Hourly_Summary_FIXED.nc'
         thresh_nc = '/discover/nobackup/cmbreen/datacenters/texas_hourly/tx_daynight_threshold.nc'
 
@@ -592,7 +592,7 @@ if __name__ == "__main__":
     # ------------------------------------------------------------------
     # NEW: Filter Texas datacenters based on NetCDF spatial boundaries
     # ------------------------------------------------------------------
-    tx_daily_nc = '/discover/nobackup/cmbreen/datacenters/texas_hourly/tx_Daily_DayNight_Summary.nc'
+    tx_daily_nc = '/discover/nobackup/cmbreen/datacenters/texas_hourly/tx_Daily_DayNight_Summary_CORRECTED.nc'
     
     # Open the TX NetCDF to grab the bounding box
     with xr.open_dataset(tx_daily_nc) as ds_tx:
