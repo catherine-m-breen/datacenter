@@ -193,16 +193,19 @@ def plot_hourly_failure_event(axes, hourly_path, thresh_path, target_date_str, d
     ax1.plot(times, event_data.Tair_C, color=line_color, linewidth=1.5)
     ax1.set_ylabel('Temp (°C)', fontsize=9)
     ax1.set_title('Hourly Fluctuations (14 Days Prior)', fontsize=12, fontweight='bold')
+    ax1.set_ylim(10, 40)
     ax1.grid(True, alpha=0.3)
 
     ax2.plot(times, event_data.enthalpy, color=line_color, linewidth=1.5)
     ax2.axhline(monthly_thresh.DayTime_Avg_enthalpy_thresholds.values, color='firebrick', linestyle='-.', linewidth=1.5)
     ax2.axhline(monthly_thresh.NightTime_Avg_enthalpy_thresholds.values, color='midnightblue', linestyle='-.', linewidth=1.5)
     ax2.set_ylabel('Enthalpy', fontsize=9)
+    ax2.set_ylim(40, 80)
     ax2.grid(True, alpha=0.3)
 
     ax3.plot(times, event_data.Qair, color=line_color, linewidth=1.5)
     ax3.set_ylabel('Qair', fontsize=9)
+    ax3.set_ylim(0.005, 0.02) # Fixed typo: assumed 0.005 instead of 0.05
     ax3.grid(True, alpha=0.3)
 
     for ax in axes:
@@ -406,12 +409,12 @@ def plot_rh_seasonal_envelope(axes, nc_path, target_date_str, dc_id, df):
         ax.text(40, 15, 'A4', color='darkgreen', fontsize=5, fontweight='bold')
 
     # Apply the panels and stars
-    format_panel(ax1, bg_data['day_H'], bg_data['xedges'], bg_data['yedges'], "ASHRAE (Daytime - Statewide Norm)")
+    format_panel(ax1, bg_data['day_H'], bg_data['xedges'], bg_data['yedges'], "ASHRAE (Daytime)")
     ax1.set_xlabel('Temp (°C)', fontsize=9)
     ax1.set_ylabel('Relative Humidity (%)', fontsize=9)
     if found_target: ax1.scatter(tgt_day_t, tgt_day_rh, color='#9f00ff', s=150, marker='*', zorder=5)
 
-    format_panel(ax2, bg_data['night_H'], bg_data['xedges'], bg_data['yedges'], "ASHRAE (Nighttime - Statewide Norm)")
+    format_panel(ax2, bg_data['night_H'], bg_data['xedges'], bg_data['yedges'], "ASHRAE (Nighttime)")
     ax2.set_xlabel('Temp (°C)', fontsize=9)
     if found_target: ax2.scatter(tgt_night_t, tgt_night_rh, color='#9f00ff', s=150, marker='*', zorder=5)
 
@@ -481,7 +484,7 @@ def generate_master_panel(pdf, dc_id, target_date, df, state_abb):
     # Quadrant 1 (Top Left): Map & Table
     # ----------------------------------------------------
     # Sub-grid to stack Map on top and Table on bottom
-    gs_left = gs[0, 0].subgridspec(2, 1, height_ratios=[3.5, 1], hspace=0.2)
+    gs_left = gs[0, 0].subgridspec(2, 1, height_ratios=[2.5, 1], hspace=0.4)
     ax_map = fig.add_subplot(gs_left[0, 0])
     ax_table = fig.add_subplot(gs_left[1, 0])
     ax_table.axis('off')
@@ -506,7 +509,7 @@ def generate_master_panel(pdf, dc_id, target_date, df, state_abb):
     ]
     
     # Updated Headers to accommodate the new metric
-    col_labels = ['Period', 'Threshold (kJ/kg)', 'Events (Crossings)', 'Total Hours Exceeded', 'Avg Hours / Event']
+    col_labels = ['Period', 'Threshold \n (kJ/kg)', 'Events \n (Crossings)', 'Total Hours \n Exceeded', 'Avg Hours / \n Event']
 
     ax_table.set_title("14-Day Pre-Event Threshold Summary", fontsize=10, fontweight='bold', pad=5)
     table = ax_table.table(cellText=table_data, colLabels=col_labels, loc='center', cellLoc='center', bbox=[0, 0, 1, 1])
