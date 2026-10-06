@@ -1,67 +1,73 @@
-import xarray as xr
-import pandas as pd
-import numpy as np
-import matplotlib
-matplotlib.use('Agg') # Crucial for Discover
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_pdf import PdfPages
 import os
 import warnings
+import numpy as np
+import pandas as pd
+import xarray as xr
+
+# CRITICAL FOR SLURM: Set backend before importing pyplot
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
+from matplotlib.gridspec import GridSpec
+
 warnings.filterwarnings('ignore')
 
 # ==========================================
-# 1. ASHRAE MATH & BOUNDS LOGIC
+# 1. ASHRAE DEFINITIONS & MATH
 # ==========================================
-def calc_sat_vapor_pressure(t_celsius): 
-    """Returns Saturation Vapor Pressure in Pascals using the Magnus formula."""
+ASHRAE_CLASSES = [
+    {'name': 'A4', 't': (5, 45), 'rh': (8, 90), 'dp': (-12, 24), 'color': 'lightgreen', 'alpha': 0.15},
+    {'name': 'A3', 't': (5, 40), 'rh': (8, 85), 'dp': (-12, 24), 'color': 'limegreen', 'alpha': 0.25},
+    {'name': 'A2', 't': (10, 35), 'rh': (8, 80), 'dp': (-12, 21), 'color': 'forestgreen', 'alpha': 0.35},
+    {'name': 'A1', 't': (15, 32), 'rh': (8, 80), 'dp': (-12, 17), 'color': 'darkgreen', 'alpha': 0.5}
+]
+
+def calc_sat_vapor_pressure(t_celsius):
     return 611.2 * np.exp((17.67 * t_celsius) / (t_celsius + 243.5))
 
-def check_outside_ashrae(t, q, p, class_name='A1'):
-    """
-    Vectorized calculation to check if (Temp, Qair, PSurf) arrays fall OUTSIDE ASHRAE envelopes.
-    Returns a Boolean array (True = Outside ASHRAE, False = Inside ASHRAE).
-    """
-    # ASHRAE Specifications: (T_min, T_max), (RH_min, RH_max), (DP_min, DP_max)
-    bounds = {
-        'A1': {'t': (15, 32), 'rh': (8, 80), 'dp': (-12, 17)}, # Recommended
-        'A4': {'t': (5, 45),  'rh': (8, 90), 'dp': (-12, 24)}  # Max Allowable
-    }
-    b = bounds[class_name]
+def get_ashrae_bounds(t_min, t_max, rh_min, rh_max, dp_min, dp_max):
+    t_grid = np.linspace(t_min, t_max, 200)
+    vp_sat_grid = calc_sat_vapor_pressure(t_grid)
+    
+    rh_dp_min = (calc_sat_vapor_pressure(dp_min) / vp_sat_grid) * 100
+    rh_dp_max = (calc_sat_vapor_pressure(dp_max) / vp_sat_grid) * 100
+    
+    b_bnd = np.maximum(rh_min, rh_dp_min)
+    t_bnd = np.minimum(rh_max, rh_dp_max)
+    return t_grid, b_bnd, t_bnd
 
-    # Calculate actual Vapor Pressure (e) and Relative Humidity (RH)
+def check_outside(t, q, p, ac):
     w = q / (1.0 - q)
-    e = (w * p) / (0.622 + w) # Vapor pressure in Pascals
+    e = (w * p) / (0.622 + w)
     vp_sat = calc_sat_vapor_pressure(t)
     rh = np.clip((e / vp_sat) * 100.0, 0, 100)
-
-    # Convert Dewpoint bounds to absolute Vapor Pressure limits
-    vp_min = calc_sat_vapor_pressure(b['dp'][0])
-    vp_max = calc_sat_vapor_pressure(b['dp'][1])
-
-    # A point is inside if T, RH, and Dewpoint (Vapor Pressure) are ALL within bounds
-    is_inside = (
-        (t >= b['t'][0]) & (t <= b['t'][1]) &
-        (rh >= b['rh'][0]) & (rh <= b['rh'][1]) &
+    
+    vp_min = calc_sat_vapor_pressure(ac['dp'][0])
+    vp_max = calc_sat_vapor_pressure(ac['dp'][1])
+    
+    inside = (
+        (t >= ac['t'][0]) & (t <= ac['t'][1]) &
+        (rh >= ac['rh'][0]) & (rh <= ac['rh'][1]) &
         (e >= vp_min) & (e <= vp_max)
     )
-    
-    # We want probability of being OUTSIDE
-    return ~is_inside 
+    return ~inside
 
+def get_rh(t, q, p):
+    w = q / (1.0 - q)
+    e = (w * p) / (0.622 + w)
+    vp_sat = calc_sat_vapor_pressure(t)
+    return np.clip((e / vp_sat) * 100.0, 0, 100)
 
 # ==========================================
-# 2. DATA PROCESSING ENGINE
+# 2. DATA PROCESSING
 # ==========================================
-def process_region_probabilities(nc_path, df, state_abb, is_aws_only=False):
-    """Pulls all datacenters via Xarray advanced indexing and computes seasonal probabilities."""
-    print(f"Processing Data for {state_abb}...")
-    
-    # 1. Open Dataset and filter bounds to avoid edge-snapping errors
+def extract_state_data(nc_path, df, state_abb, is_aws_only=False):
+    print(f"Loading {state_abb} data...")
     with xr.open_dataset(nc_path) as ds:
         min_lat, max_lat = ds.lat.min().item(), ds.lat.max().item()
         min_lon, max_lon = ds.lon.min().item(), ds.lon.max().item()
 
-    # 2. Filter DataFrame
     region_df = df[(df['state_abb'] == state_abb) & 
                    (df['lat'] >= min_lat) & (df['lat'] <= max_lat) & 
                    (df['lon'] >= min_lon) & (df['lon'] <= max_lon)]
@@ -69,114 +75,123 @@ def process_region_probabilities(nc_path, df, state_abb, is_aws_only=False):
     if is_aws_only:
         aws_ops = ['Amazon Web Services', 'AWS', 'Amazon']
         region_df = region_df[region_df['operator'].isin(aws_ops)]
-        
-    print(f" -> Found {len(region_df)} datacenters within spatial domain.")
 
-    # 3. Fast extraction using Xarray DataArrays for lat/lon lists
     lats = xr.DataArray(region_df['lat'].values, dims='datacenter')
     lons = xr.DataArray(region_df['lon'].values, dims='datacenter')
 
-    # Pulls a massive 2D array: (time, datacenter) in one quick sweep
     with xr.open_dataset(nc_path) as ds:
-        ds_dc = ds.sel(lat=lats, lon=lons, method='nearest').load()
-
-    # 4. Calculate Boolean Exceedance Matrices (True = Outside, False = Inside)
-    # Resulting shape: (time, datacenter)
-    day_t, day_q, day_p = ds_dc['DayTime_Avg_Tair'].values, ds_dc['DayTime_Avg_Qair'].values, ds_dc['DayTime_Avg_PSurf'].values
-    night_t, night_q, night_p = ds_dc['NightTime_Avg_Tair'].values, ds_dc['NightTime_Avg_Qair'].values, ds_dc['NightTime_Avg_PSurf'].values
-
-    # Ignore NaNs during the checks
-    valid_day = np.isfinite(day_t)
-    valid_night = np.isfinite(night_t)
-
-    # Attach results back to the xarray dataset for easy seasonal groupby
-    ds_dc['day_out_A1'] = (('time', 'datacenter'), check_outside_ashrae(day_t, day_q, day_p, 'A1') & valid_day)
-    ds_dc['day_out_A4'] = (('time', 'datacenter'), check_outside_ashrae(day_t, day_q, day_p, 'A4') & valid_day)
-    ds_dc['night_out_A1'] = (('time', 'datacenter'), check_outside_ashrae(night_t, night_q, night_p, 'A1') & valid_night)
-    ds_dc['night_out_A4'] = (('time', 'datacenter'), check_outside_ashrae(night_t, night_q, night_p, 'A4') & valid_night)
-
-    # 5. Group by Season and calculate overall probability (Mean)
-    # First mean across time (by season), then mean across all datacenters
-    prob_ds = ds_dc[['day_out_A1', 'day_out_A4', 'night_out_A1', 'night_out_A4']].groupby('time.season').mean(dim='time')
-    prob_overall = prob_ds.mean(dim='datacenter') * 100.0 # Convert to percentage
-
-    # Reorder seasons to chronological order
-    season_order = ['DJF', 'MAM', 'JJA', 'SON']
-    return prob_overall.sel(season=season_order)
-
-
-# ==========================================
-# 3. PLOTTING SCRIPT
-# ==========================================
-def plot_ashrae_probabilities(tx_data, va_data, output_pdf):
-    print("Generating Plots...")
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10), dpi=150)
-    fig.subplots_adjust(hspace=0.3)
-    
-    seasons = ['Winter (DJF)', 'Spring (MAM)', 'Summer (JJA)', 'Fall (SON)']
-    x = np.arange(len(seasons))
-    width = 0.2  # Width of the bars
-
-    def format_axis(ax, data, title):
-        # Extract variables
-        d_a1 = data['day_out_A1'].values
-        n_a1 = data['night_out_A1'].values
-        d_a4 = data['day_out_A4'].values
-        n_a4 = data['night_out_A4'].values
-
-        # Plot bars
-        b1 = ax.bar(x - width*1.5, d_a1, width, label='Day (Outside A1 Recommended)', color='darkorange', alpha=0.8)
-        b2 = ax.bar(x - width*0.5, d_a4, width, label='Day (Outside A4 Allowable)', color='darkorange', hatch='//', edgecolor='white')
+        # Interpolate to fix any missing "1st of the month" days
+        ds_dc = ds.sel(lat=lats, lon=lons, method='nearest').interpolate_na(dim='time', method='linear').load()
         
-        b3 = ax.bar(x + width*0.5, n_a1, width, label='Night (Outside A1 Recommended)', color='indigo', alpha=0.8)
-        b4 = ax.bar(x + width*1.5, n_a4, width, label='Night (Outside A4 Allowable)', color='indigo', hatch='//', edgecolor='white')
+    return ds_dc
 
-        # Formatting
-        ax.set_title(title, fontsize=14, fontweight='bold')
-        ax.set_ylabel('Probability (%)', fontsize=11, fontweight='bold')
-        ax.set_xticks(x)
-        ax.set_xticklabels(seasons, fontsize=11)
-        ax.set_ylim(0, 100)
-        ax.grid(axis='y', linestyle='--', alpha=0.6)
-        ax.legend(loc='upper right', fontsize=9, ncol=2)
-
-        # Add percentage labels on top of bars
-        for bars in [b1, b2, b3, b4]:
-            for bar in bars:
-                height = bar.get_height()
-                if height > 0.5: # Don't label 0% bars to keep it clean
-                    ax.annotate(f'{height:.1f}%', 
-                                xy=(bar.get_x() + bar.get_width() / 2, height),
-                                xytext=(0, 3), textcoords="offset points",
-                                ha='center', va='bottom', fontsize=8, rotation=90)
-
-    # Plot Texas and Virginia
-    format_axis(ax1, tx_data, "Texas Datacenters: Probability of Falling Outside ASHRAE Boundaries")
-    format_axis(ax2, va_data, "Virginia AWS Datacenters: Probability of Falling Outside ASHRAE Boundaries")
-
-    with PdfPages(output_pdf) as pdf:
-        pdf.savefig(fig, bbox_inches='tight')
-    plt.close()
-    print(f"-> Successfully saved {output_pdf}")
-
-
-if __name__ == "__main__":
-    # File Paths
-    csv_path = '~/INNOVATE/im3_open_source_data_center_atlas_v2026.02.09.csv'
-    tx_nc = '/discover/nobackup/cmbreen/datacenters/texas_hourly/tx_Daily_DayNight_Summary.nc'
-    va_nc = '/discover/nobackup/cmbreen/datacenters/virginia_hourly/va_Daily_DayNight_Summary.nc'
-    output_dir = '/discover/nobackup/cmbreen/datacenters/output_pdfs/'
+# ==========================================
+# 3. PLOTTING ENGINE
+# ==========================================
+def create_state_page(pdf, ds_dc, state_name):
+    print(f"Generating PDF page for {state_name}...")
+    fig = plt.figure(figsize=(24, 16), dpi=150)
+    gs = GridSpec(3, 4, figure=fig, height_ratios=[1, 1, 0.4], hspace=0.3, wspace=0.15)
     
-    os.makedirs(output_dir, exist_ok=True)
-    out_pdf = os.path.join(output_dir, 'ASHRAE_Seasonal_Probabilities.pdf')
+    fig.suptitle(f"{state_name} Datacenters: Seasonal Psychrometric Analysis", fontsize=24, fontweight='bold', y=0.95)
 
-    # Load Database
-    print("Reading Datacenter CSV...")
+    seasons = ['DJF', 'MAM', 'JJA', 'SON']
+    season_names = ['Winter (DJF)', 'Spring (MAM)', 'Summer (JJA)', 'Fall (SON)']
+    periods = [('Daytime', 'DayTime_Avg'), ('Nighttime', 'NightTime_Avg')]
+    
+    table_data = []
+    
+    # Generate 2x4 Heatmaps
+    for row_idx, (p_name, p_prefix) in enumerate(periods):
+        for col_idx, season in enumerate(seasons):
+            ax = fig.add_subplot(gs[row_idx, col_idx])
+            
+            # Extract specific season and time of day
+            ds_season = ds_dc.where(ds_dc['time'].dt.season == season, drop=True)
+            t_raw = ds_season[f'{p_prefix}_Tair'].values.flatten()
+            q_raw = ds_season[f'{p_prefix}_Qair'].values.flatten()
+            p_raw = ds_season[f'{p_prefix}_PSurf'].values.flatten()
+            
+            valid = np.isfinite(t_raw) & np.isfinite(q_raw) & np.isfinite(p_raw)
+            t, q, p_s = t_raw[valid], q_raw[valid], p_raw[valid]
+            rh = get_rh(t, q, p_s)
+            
+            # Plot Heatmap
+            ax.hist2d(t, rh, bins=[80, 80], range=[[-15, 50], [0, 100]], cmap='inferno', cmin=1, alpha=0.9)
+            
+            # Draw all 4 ASHRAE Envelopes stacked
+            for ac in ASHRAE_CLASSES:
+                t_grid, b_bnd, t_bnd = get_ashrae_bounds(*ac['t'], *ac['rh'], *ac['dp'])
+                ax.fill_between(t_grid, b_bnd, t_bnd, color=ac['color'], alpha=ac['alpha'], zorder=2)
+                
+                # Solid lines with vertical caps
+                ax.plot(t_grid, t_bnd, color=ac['color'], linewidth=1.5, zorder=3)
+                ax.plot(t_grid, b_bnd, color=ac['color'], linewidth=1.5, zorder=3)
+                ax.plot([t_grid[0], t_grid[0]], [b_bnd[0], t_bnd[0]], color=ac['color'], linewidth=1.5, zorder=3)
+                ax.plot([t_grid[-1], t_grid[-1]], [b_bnd[-1], t_bnd[-1]], color=ac['color'], linewidth=1.5, zorder=3)
+            
+            # Labels and Limits
+            ax.set_title(f"{p_name} | {season_names[col_idx]}", fontsize=14, fontweight='bold')
+            ax.set_xlim(-15, 50)
+            ax.set_ylim(0, 100)
+            ax.grid(alpha=0.3, linestyle='--')
+            
+            if row_idx == 1: ax.set_xlabel('Temperature (°C)', fontsize=12)
+            if col_idx == 0: ax.set_ylabel('Relative Humidity (%)', fontsize=12)
+
+            # Calculate Probabilities for the Table
+            probs = []
+            for ac in ASHRAE_CLASSES[::-1]: # A1, A2, A3, A4
+                out_bool = check_outside(t, q, p_s, ac)
+                pct = (np.sum(out_bool) / len(t)) * 100 if len(t) > 0 else 0
+                probs.append(f"{pct:.2f}%")
+                
+            table_data.append([p_name, season_names[col_idx]] + probs)
+
+    # Generate Probability Table in the bottom row spanning all columns
+    ax_table = fig.add_subplot(gs[2, :])
+    ax_table.axis('off')
+    
+    col_labels = ['Period', 'Season', 'Outside A1', 'Outside A2', 'Outside A3', 'Outside A4']
+    table = ax_table.table(cellText=table_data, colLabels=col_labels, loc='center', cellLoc='center', bbox=[0.1, 0, 0.8, 1])
+    
+    table.auto_set_font_size(False)
+    table.set_fontsize(12)
+    
+    for (i, j), cell in table.get_celld().items():
+        if i == 0:
+            cell.set_text_props(weight='bold', color='white')
+            cell.set_facecolor('#4c4c4c')
+        else:
+            cell.set_facecolor('#f2f2f2' if i % 2 == 0 else 'white')
+
+    pdf.savefig(fig, bbox_inches='tight')
+    plt.close(fig)
+
+# ==========================================
+# 4. MAIN EXECUTION
+# ==========================================
+if __name__ == "__main__":
+    csv_path = '~/INNOVATE/im3_open_source_data_center_atlas_v2026.02.09.csv'
+    va_nc = '/discover/nobackup/cmbreen/datacenters/virginia_hourly/va_Daily_DayNight_Summary_CORRECTED.nc'
+    tx_nc = '/discover/nobackup/cmbreen/datacenters/texas_hourly/tx_Daily_DayNight_Summary_CORRECTED.nc'
+    
+    output_dir = '/discover/nobackup/cmbreen/datacenters/output_pdfs/'
+    os.makedirs(output_dir, exist_ok=True)
+    out_pdf = os.path.join(output_dir, 'ASHRAE_Seasonal_Matrix.pdf')
+
+    print("Loading locations database...")
     df = pd.read_csv(csv_path)
 
-    # Process Data
-    tx_results = process_region_probabilities(tx_nc, df, 'TX', is_aws_only=False)
-    va_results = process_region_probabilities(va_nc, df, 'VA', is_aws_only=True)
+    # Run for both states
+    ds_va = extract_state_data(va_nc, df, 'VA', is_aws_only=True)
+    ds_tx = extract_state_data(tx_nc, df, 'TX', is_aws_only=False)
 
-    # Generate Chart
-    plot_ashrae_probabilities(tx_results, va_results, out_pdf)
+    with PdfPages(out_pdf) as pdf:
+        create_state_page(pdf, ds_va, "Virginia AWS")
+        create_state_page(pdf, ds_tx, "Texas")
+        
+    ds_va.close()
+    ds_tx.close()
+    
+    print(f"Success! Matrix saved to: {out_pdf}")

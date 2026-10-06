@@ -121,7 +121,7 @@ def plot_failure_event_with_baselines(axes, ds_path, thresh_path, target_date_st
 
     target_date = pd.to_datetime(target_date_str)
     start_date = target_date - pd.Timedelta(days=14)
-    end_date = target_date + pd.Timedelta(days=1)
+    end_date = target_date + pd.Timedelta(days=3)
     month_str = target_date.strftime('%Y-%m')
 
     ds = xr.open_dataset(ds_path)
