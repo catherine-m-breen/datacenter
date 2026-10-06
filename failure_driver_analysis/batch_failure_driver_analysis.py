@@ -178,7 +178,7 @@ def plot_hourly_failure_event(axes, hourly_path, thresh_path, target_date_str, d
 
     target_date = pd.to_datetime(target_date_str)
     start_date = target_date - pd.Timedelta(days=14)
-    end_date = target_date + pd.Timedelta(days=1)
+    end_date = target_date + pd.Timedelta(days=3)
     month_str = target_date.strftime('%Y-%m')
 
     ds_hourly = xr.open_dataset(hourly_path)
