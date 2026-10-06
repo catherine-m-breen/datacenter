@@ -200,7 +200,7 @@ def plot_hourly_failure_event(axes, hourly_path, thresh_path, target_date_str, d
     ax2.axhline(monthly_thresh.DayTime_Avg_enthalpy_thresholds.values, color='firebrick', linestyle='-.', linewidth=1.5)
     ax2.axhline(monthly_thresh.NightTime_Avg_enthalpy_thresholds.values, color='midnightblue', linestyle='-.', linewidth=1.5)
     ax2.set_ylabel('Enthalpy', fontsize=9)
-    ax2.set_ylim(40, 80)
+    ax2.set_ylim(20, 90)
     ax2.grid(True, alpha=0.3)
 
     ax3.plot(times, event_data.Qair, color=line_color, linewidth=1.5)
