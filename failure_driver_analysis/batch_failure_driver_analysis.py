@@ -154,7 +154,7 @@ def plot_failure_event_with_baselines(axes, ds_path, thresh_path, target_date_st
     ax2.plot(times, event_data.NightTime_Avg_enthalpy, color='purple', linewidth=2)
     ax2.set_ylabel('Enthalpy (kJ/kg)', fontsize=9)
     ax2.legend(loc='upper left', ncol=1, fontsize=7)
-    ax2.set_ylim(20, 80)
+    ax2.set_ylim(20, 85)
     ax2.grid(True, alpha=0.3)
 
     # Humidity
