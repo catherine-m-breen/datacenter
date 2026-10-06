@@ -199,7 +199,7 @@ if __name__ == "__main__":
     # 1. Define Failures (Y = 1)
     target_events = [
         {"date": "2012-06-29", "state": "VA", "desc": "AWS_us-east-1", "is_fail": 1},
-        {"date": "2018-09-04", "state": "TX", "desc": "San_Antonio_NA", "is_fail": 1},
+     #   {"date": "2018-09-04", "state": "TX", "desc": "San_Antonio_NA", "is_fail": 1},
         {"date": "2023-07-31", "state": "TX", "desc": "First_Major_Peak", "is_fail": 1},
         {"date": "2023-08-10", "state": "TX", "desc": "Summer_2023_Peak", "is_fail": 1},
         {"date": "2023-08-17", "state": "TX", "desc": "Late_Aug_Heatwave_1", "is_fail": 1},

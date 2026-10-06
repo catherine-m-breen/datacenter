@@ -144,7 +144,7 @@ def plot_failure_event_with_baselines(axes, ds_path, thresh_path, target_date_st
     ax1.set_title('Daily Build-up (14 Days Prior)', fontsize=12, fontweight='bold')
     ax1.legend(loc='upper left', ncol=2, fontsize=7)
     ax1.set_ylim(10, 50)
-    ax1.set_xlim(times[0], times[-1]) # Locks X-axis tight to the data window
+    #ax1.set_xlim(times[0], times[-1]) # Locks X-axis tight to the data window
     ax1.grid(True, alpha=0.3)
 
     # Enthalpy
