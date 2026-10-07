@@ -164,9 +164,9 @@ if __name__ == "__main__":
     process_state_full(
         base_path=base_forcing_path,
         output_dir='/discover/nobackup/cmbreen/datacenters/texas_hourly',
-        lat_slice=slice(38.5, 39.5),
-        lon_slice=slice(-78, -77),
-        prefix='va',
-        tz_name='Eastern Standard Time',
-        utc_offset=-5
+        lat_slice=slice(32.3, 33.3),
+        lon_slice=slice(-97.5, -96.5),
+        prefix='tx',
+        tz_name='Central Standard Time',
+        utc_offset=-6
     )
