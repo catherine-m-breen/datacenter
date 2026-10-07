@@ -214,11 +214,11 @@ if __name__ == "__main__":
     df = pd.read_csv(csv_path)
 
     # Run for both states
-    ds_va = extract_state_data(va_nc, df, 'VA', is_aws_only=True)
+    ds_va = extract_state_data(va_nc, df, 'VA', is_aws_only=False)
     ds_tx = extract_state_data(tx_nc, df, 'TX', is_aws_only=False)
 
     with PdfPages(out_pdf) as pdf:
-        create_state_page(pdf, ds_va, "Virginia AWS")
+        create_state_page(pdf, ds_va, "Virginia")
         create_state_page(pdf, ds_tx, "Texas")
         
     ds_va.close()
