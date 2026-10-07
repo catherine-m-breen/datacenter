@@ -80,7 +80,15 @@ def process_state_full(base_path, output_dir, lat_slice, lon_slice, prefix, tz_n
     print(f"\n--- PHASE 2: Time Shifting & Resampling on Full Continuous Dataset ---")
     
     # Load all intermediate hourly files into one continuous timeline
-    ds_full = xr.open_mfdataset(hourly_files, combine='by_coords', parallel=False)
+    # ds_full = xr.open_mfdataset(hourly_files, combine='by_coords', parallel=False)
+        # ds_full = xr.open_mfdataset(hourly_files, combine='by_coords', parallel=False)
+    ds_full = xr.open_mfdataset(
+        hourly_files, 
+        combine='nested',       # Use nested list structure rather than auto-coord matching
+        concat_dim='time',      # Explicitly state we are concatenating through time
+        join='override',        # Force strict alignment of lat/lon without checking for floating point drift
+        parallel=False
+    )
     
     # Because we heavily spatially cropped this, it is easily small enough to load entirely into RAM.
     # Loading it into memory makes the resample process blazingly fast.
