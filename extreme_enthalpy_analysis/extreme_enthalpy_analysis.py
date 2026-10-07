@@ -183,39 +183,28 @@
 # plt.close()
 
 # print(f"Success! Plot saved to: {output_pdf}")
-
 import os
-import warnings
-import xarray as xr
-import pandas as pd
 import numpy as np
-from scipy.stats import linregress
-
-# CRITICAL FOR SLURM: Set backend before importing pyplot
-import matplotlib
-matplotlib.use('Agg') 
+import pandas as pd
+import xarray as xr
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
-
-# Suppress annoying slice/nan warnings for a clean SLURM .out log
-warnings.filterwarnings('ignore')
+from scipy.stats import linregress
 
 # ==========================================
 # 1. LOAD DATA
 # ==========================================
 print("Loading datasets...")
-# va_zarr = '/discover/nobackup/cmbreen/datacenters/virginia_enthalpy_stacked.zarr'
-# tx_zarr = '/discover/nobackup/cmbreen/datacenters/texas_enthalpy_stacked.zarr'
 
-va_zarr = '/discover/nobackup/cmbreen/datacenters/virginia_hourly/va_Daily_DayNight_Summary_CORRECTED.nc'
-tx_zarr = '/discover/nobackup/cmbreen/datacenters/texas_hourly/tx_Daily_DayNight_Summary_CORRECTED.nc'
+va_nc = '/discover/nobackup/cmbreen/datacenters/virginia_hourly/va_Daily_DayNight_Summary_CORRECTED.nc'
+tx_nc = '/discover/nobackup/cmbreen/datacenters/texas_hourly/tx_Daily_DayNight_Summary_CORRECTED.nc'
 
-# Use absolute path to ensure SLURM finds it regardless of launch directory
+# Use absolute path to ensure SLURM finds it
 locations_csv = '~/INNOVATE/im3_open_source_data_center_atlas_v2026.02.09.csv'
 output_pdf = '/discover/nobackup/cmbreen/datacenters/output_pdfs/Extreme_Enthalpy_Trends.pdf'
 
-va_ts = xr.open_dataset(va_zarr)
-tx_ts = xr.open_dataset(tx_zarr)
+va_ts = xr.open_dataset(va_nc)
+tx_ts = xr.open_dataset(tx_nc)
 locations_df = pd.read_csv(locations_csv)
 
 target_quantiles = [0.90, 0.95, 0.99]
@@ -223,7 +212,7 @@ seasons_map = {'DJF': 'Winter', 'MAM': 'Spring', 'JJA': 'Summer', 'SON': 'Fall'}
 season_keys = list(seasons_map.keys())
 
 # ==========================================
-# 2. EXTRACT DATACENTER LOCATIONS & VARIABLES
+# 2. EXTRACT DATACENTER LOCATIONS
 # ==========================================
 def get_dc_coords(ds, df):
     min_lon, max_lon = ds.lon.min().item(), ds.lon.max().item()
@@ -245,50 +234,12 @@ print(f"Number of Virginia data centers: {va_count}")
 print(f"Number of Texas data centers: {tx_count}")
 
 print("Extracting variables via nearest neighbor...")
-# Extract violations
-va_dc_hot = va_ts['crossed_seasonal_hot'].sel(lon=va_lons, lat=va_lats, method='nearest')
-tx_dc_hot = tx_ts['crossed_seasonal_hot'].sel(lon=tx_lons, lat=tx_lats, method='nearest')
-
-# Extract temperatures
-va_dc_temp = va_ts['Tair'].sel(lon=va_lons, lat=va_lats, method='nearest')
-tx_dc_temp = tx_ts['Tair'].sel(lon=tx_lons, lat=tx_lats, method='nearest')
+# Extract all variables for just the data center locations
+va_pts = va_ts.sel(lon=va_lons, lat=va_lats, method='nearest')
+tx_pts = tx_ts.sel(lon=tx_lons, lat=tx_lats, method='nearest')
 
 # ==========================================
-# 3. HELPER FUNCTIONS (Now with Day/Night Split)
-# ==========================================
-def filter_time_of_day(ts, time_of_day):
-    """Filters an xarray dataset for daytime (06:00-17:59) or nighttime (18:00-05:59)."""
-    if time_of_day == 'daytime':
-        return ts.where((ts['time'].dt.hour >= 6) & (ts['time'].dt.hour < 18), drop=True)
-    elif time_of_day == 'nighttime':
-        return ts.where((ts['time'].dt.hour >= 18) | (ts['time'].dt.hour < 6), drop=True)
-    return ts
-
-def get_yearly_violations_dc(dc_ts, quantile, season_str, time_of_day):
-    """Returns the raw count of total violations and exact possible time-steps per year."""
-    # Ensure quantile coordinate exists in dataset before selecting
-    q_ts = dc_ts.sel(quantile=quantile) if 'quantile' in dc_ts.coords else dc_ts
-    
-    season_ts = q_ts.where(q_ts['time'].dt.season == season_str, drop=True)
-    season_ts = filter_time_of_day(season_ts, time_of_day)
-    
-    daily_actual = season_ts.sum(dim='points')
-    yearly_actual = daily_actual.groupby('time.year').sum().to_pandas()
-    
-    # Dynamically count exactly how many time steps existed for this grouping (robust to leap years)
-    timesteps_per_year = season_ts['time'].groupby('time.year').count().to_pandas()
-    
-    return yearly_actual.loc[2002:2023], timesteps_per_year.loc[2002:2023]
-
-def get_yearly_avg_temp(dc_temp, season_str, time_of_day):
-    season_ts = dc_temp.where(dc_temp['time'].dt.season == season_str, drop=True)
-    season_ts = filter_time_of_day(season_ts, time_of_day)
-    
-    yearly_temp = season_ts.mean(dim='points').groupby('time.year').mean().to_pandas()
-    return yearly_temp.loc[2002:2023]
-
-# ==========================================
-# 4. PLOT MULTI-PAGE PDF
+# 3. PLOT MULTI-PAGE PDF
 # ==========================================
 print("Generating trend plots into Multi-Page PDF...")
 
@@ -297,33 +248,49 @@ os.makedirs(os.path.dirname(output_pdf), exist_ok=True)
 colors = {'Virginia': '#1f77b4', 'Texas': '#ff7f0e'}  
 trend_colors = {'Virginia': '#08519c', 'Texas': '#a63603'} 
 
-# Datasets to iterate over
 states_data = [
-    ('Virginia', va_dc_hot, va_dc_temp, va_count),
-    ('Texas', tx_dc_hot, tx_dc_temp, tx_count)
+    ('Virginia', va_pts, va_count),
+    ('Texas', tx_pts, tx_count)
 ]
 
 with PdfPages(output_pdf) as pdf:
     # 1. Outer Loop: State
-    for state_name, dc_hot, dc_temp, dc_count in states_data:
+    for state_name, ds_pts, dc_count in states_data:
         # 2. Inner Loop: Quantile (90, 95, 99)
         for q in target_quantiles:
             
             # Create a 2x4 Grid per State-Quantile combination
-            fig, axes = plt.subplots(2, 4, figsize=(20, 10), sharex=True)
+            fig, axes = plt.subplots(2, 4, figsize=(20, 10), sharex=False) # Turned off sharex to handle dynamic years better
             fig.suptitle(f'{state_name} Extreme Enthalpy Trends - Quantile: {q}', fontsize=20, y=0.98, fontweight='bold')
             
             # Row 0: Daytime, Row 1: Nighttime
-            for row_idx, tod in enumerate(['daytime', 'nighttime']):
+            for row_idx, tod_prefix in enumerate(['DayTime', 'NightTime']):
+                
+                # Identify variable names dynamically based on your NetCDF schema
+                enthalpy_var = f"{tod_prefix}_Avg_enthalpy"
+                threshold_var = f"{tod_prefix}_Avg_enthalpy_thresholds"
+                temp_var = f"{tod_prefix}_Avg_Tair"
+                
+                # Check where Enthalpy > Threshold for the specific quantile
+                thresholds_q = ds_pts[threshold_var].sel(quantile=q)
+                violations = (ds_pts[enthalpy_var] > thresholds_q).astype(int)
+                
                 for col_idx, season_key in enumerate(season_keys):
                     ax = axes[row_idx, col_idx]
                     season_name = seasons_map[season_key]
                     
-                    # Fetch metrics
-                    counts, time_steps = get_yearly_violations_dc(dc_hot, q, season_key, tod)
+                    # Filter to current season
+                    season_mask = violations['time'].dt.season == season_key
+                    season_violations = violations.where(season_mask, drop=True)
+                    season_temp = ds_pts[temp_var].where(season_mask, drop=True)
+                    
+                    # Aggregate to yearly summaries
+                    daily_actual = season_violations.sum(dim='points')
+                    counts = daily_actual.groupby('time.year').sum().to_pandas()
+                    time_steps = season_violations['time'].groupby('time.year').count().to_pandas()
+                    temp_vals = season_temp.mean(dim='points').groupby('time.year').mean().to_pandas()
                     
                     # Dynamic percentage: (Total Violations) / (Number of DCs * Available Timesteps) * 100
-                    # This safely replaces the hardcoded "90" logic from previous script
                     if len(time_steps) > 0:
                         pct = (counts.values / (dc_count * time_steps.values)) * 100
                     else:
@@ -341,15 +308,14 @@ with PdfPages(output_pdf) as pdf:
                         
                     # Plot secondary Temperature line
                     ax2 = ax.twinx()
-                    temp_vals = get_yearly_avg_temp(dc_temp, season_key, tod)
                     ax2.plot(temp_vals.index, temp_vals.values, color='grey', marker='.', linestyle='-', linewidth=2, label='Avg Temp')
                     
                     # Titles and grids
-                    ax.set_title(f'{season_name} - {tod.capitalize()}', fontsize=14)
+                    tod_label = 'Daytime' if row_idx == 0 else 'Nighttime'
+                    ax.set_title(f'{season_name} - {tod_label}', fontsize=14)
                     ax.grid(axis='y', linestyle='--', alpha=0.7)
                     
                     # Y-Axis Scaling 
-                    # Use a small buffer so bars don't clip the top, adapt strictly for 99th quantile
                     max_pct = pct.max() if len(pct) > 0 and not np.isnan(pct.max()) else 10
                     ax.set_ylim(0, max(max_pct * 1.3, 5)) 
 
@@ -370,9 +336,14 @@ with PdfPages(output_pdf) as pdf:
                     
                     # X-Axis formatting (Bottom row only)
                     if row_idx == 1:
-                        ax.set_xlim(2001.5, 2023.5)
-                        ax.set_xticks([2002, 2007, 2012, 2017, 2022])
+                        min_yr, max_yr = int(counts.index.min()), int(counts.index.max())
+                        ax.set_xlim(min_yr - 0.5, max_yr + 0.5)
+                        # Set a tick every 5 years dynamically based on your data length
+                        ax.set_xticks(range(min_yr, max_yr + 1, 5))
                         ax.set_xlabel('Year', fontsize=14)
+                    else:
+                        # Hide x-axis labels for the top row to make it cleaner
+                        ax.set_xticklabels([])
                         
                     ax.tick_params(axis='both', which='major', labelsize=12, length=6, width=2)
                     ax2.tick_params(axis='both', which='major', labelsize=12, length=6, width=2)
