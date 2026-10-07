@@ -214,8 +214,8 @@ tx_zarr = '/discover/nobackup/cmbreen/datacenters/texas_hourly/tx_Daily_DayNight
 locations_csv = '~/INNOVATE/im3_open_source_data_center_atlas_v2026.02.09.csv'
 output_pdf = '/discover/nobackup/cmbreen/datacenters/output_pdfs/Extreme_Enthalpy_Trends.pdf'
 
-va_ts = xr.open_dataset(va_zarr, engine='zarr')
-tx_ts = xr.open_dataset(tx_zarr, engine='zarr')
+va_ts = xr.open_dataset(va_zarr)
+tx_ts = xr.open_dataset(tx_zarr)
 locations_df = pd.read_csv(locations_csv)
 
 target_quantiles = [0.90, 0.95, 0.99]
