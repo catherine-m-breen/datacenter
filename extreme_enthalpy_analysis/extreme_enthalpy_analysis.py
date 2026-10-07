@@ -207,8 +207,8 @@ print("Loading datasets...")
 # va_zarr = '/discover/nobackup/cmbreen/datacenters/virginia_enthalpy_stacked.zarr'
 # tx_zarr = '/discover/nobackup/cmbreen/datacenters/texas_enthalpy_stacked.zarr'
 
-va_zarr = '/discover/nobackup/cmbreen/datacenters/virginia_hourly/va_Daily_DayNight_Summary_CORRECTED2.nc'
-tx_zarr = '/discover/nobackup/cmbreen/datacenters/texas_hourly/tx_Daily_DayNight_Summary_CORRECTED2.nc'
+va_zarr = '/discover/nobackup/cmbreen/datacenters/virginia_hourly/va_Daily_DayNight_Summary_CORRECTED.nc'
+tx_zarr = '/discover/nobackup/cmbreen/datacenters/texas_hourly/tx_Daily_DayNight_Summary_CORRECTED.nc'
 
 # Use absolute path to ensure SLURM finds it regardless of launch directory
 locations_csv = '~/INNOVATE/im3_open_source_data_center_atlas_v2026.02.09.csv'
