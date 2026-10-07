@@ -181,8 +181,6 @@
 # os.makedirs(os.path.dirname(output_pdf), exist_ok=True)
 # plt.savefig(output_pdf, bbox_inches='tight', dpi=150)
 # plt.close()
-
-# print(f"Success! Plot saved to: {output_pdf}")
 import os
 import numpy as np
 import pandas as pd
@@ -196,15 +194,23 @@ from scipy.stats import linregress
 # ==========================================
 print("Loading datasets...")
 
+# Timeseries Data
 va_nc = '/discover/nobackup/cmbreen/datacenters/virginia_hourly/va_Daily_DayNight_Summary_CORRECTED.nc'
 tx_nc = '/discover/nobackup/cmbreen/datacenters/texas_hourly/tx_Daily_DayNight_Summary_CORRECTED.nc'
 
-# Use absolute path to ensure SLURM finds it
+# Threshold Data
+va_thresh_nc = '/discover/nobackup/cmbreen/datacenters/virginia_hourly/va_daynight_threshold.nc'
+tx_thresh_nc = '/discover/nobackup/cmbreen/datacenters/texas_hourly/tx_daynight_threshold.nc'
+
+# Locations & Output
 locations_csv = '~/INNOVATE/im3_open_source_data_center_atlas_v2026.02.09.csv'
 output_pdf = '/discover/nobackup/cmbreen/datacenters/output_pdfs/Extreme_Enthalpy_Trends.pdf'
 
 va_ts = xr.open_dataset(va_nc)
 tx_ts = xr.open_dataset(tx_nc)
+va_thresh = xr.open_dataset(va_thresh_nc)
+tx_thresh = xr.open_dataset(tx_thresh_nc)
+
 locations_df = pd.read_csv(locations_csv)
 
 target_quantiles = [0.90, 0.95, 0.99]
@@ -234,12 +240,16 @@ print(f"Number of Virginia data centers: {va_count}")
 print(f"Number of Texas data centers: {tx_count}")
 
 print("Extracting variables via nearest neighbor...")
-# Extract all variables for just the data center locations
+# Extract timeseries variables for the data center locations
 va_pts = va_ts.sel(lon=va_lons, lat=va_lats, method='nearest')
 tx_pts = tx_ts.sel(lon=tx_lons, lat=tx_lats, method='nearest')
 
+# Extract threshold variables for the exact same data center locations
+va_thresh_pts = va_thresh.sel(lon=va_lons, lat=va_lats, method='nearest')
+tx_thresh_pts = tx_thresh.sel(lon=tx_lons, lat=tx_lats, method='nearest')
+
 # ==========================================
-# 3. PLOT MULTI-PAGE PDF
+# 3. PLOT MULTI-PAGE PDF & DEBUG
 # ==========================================
 print("Generating trend plots into Multi-Page PDF...")
 
@@ -249,32 +259,58 @@ colors = {'Virginia': '#1f77b4', 'Texas': '#ff7f0e'}
 trend_colors = {'Virginia': '#08519c', 'Texas': '#a63603'} 
 
 states_data = [
-    ('Virginia', va_pts, va_count),
-    ('Texas', tx_pts, tx_count)
+    ('Virginia', va_pts, va_thresh_pts, va_count),
+    ('Texas', tx_pts, tx_thresh_pts, tx_count)
 ]
 
 with PdfPages(output_pdf) as pdf:
     # 1. Outer Loop: State
-    for state_name, ds_pts, dc_count in states_data:
+    for state_name, ds_pts, thresh_pts, dc_count in states_data:
         # 2. Inner Loop: Quantile (90, 95, 99)
         for q in target_quantiles:
             
-            # Create a 2x4 Grid per State-Quantile combination
-            fig, axes = plt.subplots(2, 4, figsize=(20, 10), sharex=False) # Turned off sharex to handle dynamic years better
+            fig, axes = plt.subplots(2, 4, figsize=(20, 10), sharex=False)
             fig.suptitle(f'{state_name} Extreme Enthalpy Trends - Quantile: {q}', fontsize=20, y=0.98, fontweight='bold')
             
             # Row 0: Daytime, Row 1: Nighttime
             for row_idx, tod_prefix in enumerate(['DayTime', 'NightTime']):
                 
-                # Identify variable names dynamically based on your NetCDF schema
                 enthalpy_var = f"{tod_prefix}_Avg_enthalpy"
                 threshold_var = f"{tod_prefix}_Avg_enthalpy_thresholds"
                 temp_var = f"{tod_prefix}_Avg_Tair"
                 
-                # Check where Enthalpy > Threshold for the specific quantile
-                thresholds_q = ds_pts[threshold_var].sel(quantile=q)
+                # Load threshold from the separate file
+                if threshold_var in thresh_pts:
+                    thresholds_q = thresh_pts[threshold_var].sel(quantile=q)
+                elif enthalpy_var in thresh_pts:  # Fallback just in case the variables are named identically
+                    thresholds_q = thresh_pts[enthalpy_var].sel(quantile=q)
+                else:
+                    if row_idx == 0 and q == 0.90:
+                        print(f"[{state_name}] Warning: Threshold var not found. Calculating on the fly...")
+                    thresholds_q = ds_pts[enthalpy_var].quantile(q, dim='time')
+                
+                # Check violations by comparing timeseries to the threshold file
                 violations = (ds_pts[enthalpy_var] > thresholds_q).astype(int)
                 
+                # --- SUMMER 2012 DEBUGGING CHECK ---
+                if q == 0.99 and tod_prefix == 'DayTime':
+                    try:
+                        summer_2012 = violations.sel(time=slice('2012-06-01', '2012-08-31'))
+                        # Find days where AT LEAST ONE datacenter in the state crossed the threshold
+                        days_with_violations = summer_2012.sum(dim='points') > 0
+                        violation_dates = days_with_violations.where(days_with_violations, drop=True).time.dt.date.values
+                        
+                        print(f"\n---> {state_name} Summer 2012 Debug (Daytime, q={q}) <---")
+                        print(f"Total violation days in JJA 2012: {len(violation_dates)}")
+                        print(f"Dates crossed: {violation_dates}")
+                        if np.datetime64('2012-06-29') in np.array(violation_dates, dtype='datetime64[D]'):
+                            print("SUCCESS: June 29, 2012 WAS detected as a violation day!\n")
+                        else:
+                            print("MISSING: June 29, 2012 was NOT flagged.\n")
+                    except Exception as e:
+                        print(f"Could not print 2012 debug info: {e}")
+                # ------------------------------------
+
                 for col_idx, season_key in enumerate(season_keys):
                     ax = axes[row_idx, col_idx]
                     season_name = seasons_map[season_key]
@@ -290,7 +326,7 @@ with PdfPages(output_pdf) as pdf:
                     time_steps = season_violations['time'].groupby('time.year').count().to_pandas()
                     temp_vals = season_temp.mean(dim='points').groupby('time.year').mean().to_pandas()
                     
-                    # Dynamic percentage: (Total Violations) / (Number of DCs * Available Timesteps) * 100
+                    # Dynamic percentage
                     if len(time_steps) > 0:
                         pct = (counts.values / (dc_count * time_steps.values)) * 100
                     else:
@@ -338,11 +374,9 @@ with PdfPages(output_pdf) as pdf:
                     if row_idx == 1:
                         min_yr, max_yr = int(counts.index.min()), int(counts.index.max())
                         ax.set_xlim(min_yr - 0.5, max_yr + 0.5)
-                        # Set a tick every 5 years dynamically based on your data length
                         ax.set_xticks(range(min_yr, max_yr + 1, 5))
                         ax.set_xlabel('Year', fontsize=14)
                     else:
-                        # Hide x-axis labels for the top row to make it cleaner
                         ax.set_xticklabels([])
                         
                     ax.tick_params(axis='both', which='major', labelsize=12, length=6, width=2)
