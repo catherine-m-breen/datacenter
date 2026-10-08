@@ -232,8 +232,39 @@ target_quantiles = [0.90, 0.95, 0.99]
 seasons_map = {'DJF': 'Winter', 'MAM': 'Spring', 'JJA': 'Summer', 'SON': 'Fall'}
 season_keys = list(seasons_map.keys())
 
+# # ==========================================
+# # 2. EXTRACT DATACENTER LOCATIONS
+# # ==========================================
+# def get_dc_coords(ds, df):
+#     min_lon, max_lon = ds.lon.min().item(), ds.lon.max().item()
+#     min_lat, max_lat = ds.lat.min().item(), ds.lat.max().item()
+    
+#     mask = (df['lon'] >= min_lon) & (df['lon'] <= max_lon) & \
+#            (df['lat'] >= min_lat) & (df['lat'] <= max_lat)
+#     state_df = df[mask]
+    
+#     lons = xr.DataArray(state_df['lon'].values, dims='points')
+#     lats = xr.DataArray(state_df['lat'].values, dims='points')
+    
+#     return lons, lats, len(state_df)
+
+# va_lons, va_lats, va_count = get_dc_coords(va_ts, locations_df)
+# tx_lons, tx_lats, tx_count = get_dc_coords(tx_ts, locations_df)
+
+# print(f"Number of Virginia data centers: {va_count}")
+# print(f"Number of Texas data centers: {tx_count}")
+
+# print("Extracting variables via nearest neighbor...")
+# # Extract timeseries variables for the data center locations
+# va_pts = va_ts.sel(lon=va_lons, lat=va_lats, method='nearest')
+# tx_pts = tx_ts.sel(lon=tx_lons, lat=tx_lats, method='nearest')
+
+# # Extract threshold variables for the exact same data center locations
+# va_thresh_pts = va_thresh.sel(lon=va_lons, lat=va_lats, method='nearest')
+# tx_thresh_pts = tx_thresh.sel(lon=tx_lons, lat=tx_lats, method='nearest')
+
 # ==========================================
-# 2. EXTRACT DATACENTER LOCATIONS
+# 2. EXTRACT DATACENTER LOCATIONS (WITH CACHING)
 # ==========================================
 def get_dc_coords(ds, df):
     min_lon, max_lon = ds.lon.min().item(), ds.lon.max().item()
@@ -254,14 +285,38 @@ tx_lons, tx_lats, tx_count = get_dc_coords(tx_ts, locations_df)
 print(f"Number of Virginia data centers: {va_count}")
 print(f"Number of Texas data centers: {tx_count}")
 
-print("Extracting variables via nearest neighbor...")
+# ---------------------------------------------------------
+# NEW: Caching logic to save the extracted points
+# ---------------------------------------------------------
+print("Extracting (or loading cached) variables via nearest neighbor...")
+
+cache_dir = '/discover/nobackup/cmbreen/datacenters/point_cache'
+os.makedirs(cache_dir, exist_ok=True)
+
+va_pts_cache = os.path.join(cache_dir, 'va_timeseries_pts.nc')
+tx_pts_cache = os.path.join(cache_dir, 'tx_timeseries_pts.nc')
+va_thresh_cache = os.path.join(cache_dir, 'va_thresholds_pts.nc')
+tx_thresh_cache = os.path.join(cache_dir, 'tx_thresholds_pts.nc')
+
+def load_or_extract(ds, lons, lats, cache_path):
+    if os.path.exists(cache_path):
+        print(f"  -> Quick-loading cached datacenter points: {os.path.basename(cache_path)}")
+        # .load() forces it entirely into memory so groupby/sum operations are instant
+        return xr.open_dataset(cache_path).load() 
+    else:
+        print(f"  -> Extracting from massive map to {os.path.basename(cache_path)} (Runs ONCE)...")
+        # Extract nearest neighbors and pull into RAM
+        pts = ds.sel(lon=lons, lat=lats, method='nearest').load()
+        pts.to_netcdf(cache_path)
+        return pts
+
 # Extract timeseries variables for the data center locations
-va_pts = va_ts.sel(lon=va_lons, lat=va_lats, method='nearest')
-tx_pts = tx_ts.sel(lon=tx_lons, lat=tx_lats, method='nearest')
+va_pts = load_or_extract(va_ts, va_lons, va_lats, va_pts_cache)
+tx_pts = load_or_extract(tx_ts, tx_lons, tx_lats, tx_pts_cache)
 
 # Extract threshold variables for the exact same data center locations
-va_thresh_pts = va_thresh.sel(lon=va_lons, lat=va_lats, method='nearest')
-tx_thresh_pts = tx_thresh.sel(lon=tx_lons, lat=tx_lats, method='nearest')
+va_thresh_pts = load_or_extract(va_thresh, va_lons, va_lats, va_thresh_cache)
+tx_thresh_pts = load_or_extract(tx_thresh, tx_lons, tx_lats, tx_thresh_cache)
 
 # ==========================================
 # 3. PLOT MULTI-PAGE PDF & DEBUG
