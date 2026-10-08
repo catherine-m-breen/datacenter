@@ -103,11 +103,36 @@ def compute_threshold_stats(daily_path, hourly_path, thresh_path, target_date_st
             if above[0] == 1: crossings += 1 
             stats[f'{prefix}_cross'] = int(crossings)
             
+    # daily_data = ds_daily.sel(lat=dc_lat, lon=dc_lon, method='nearest').sel(time=slice(start_date, target_date)).load()
+    # for prefix, var_name in [('day', 'DayTime_Avg_enthalpy'), ('night', 'NightTime_Avg_enthalpy')]:
+    #     d_enth = daily_data[var_name].values
+    #     stats[f'{prefix}_surge_24'] = float(np.max(np.diff(d_enth))) if len(d_enth) > 1 else 0.0
+    #     stats[f'{prefix}_surge_48'] = float(np.max(d_enth[2:] - d_enth[:-2])) if len(d_enth) > 2 else 0.0
+            
+    # ds_hourly.close(); ds_thresh.close(); ds_daily.close()
+    # return stats
+
+    # -----------------------------------------------------
+    # 2. Daily Stats (24-hr and 48-hr Surge leading into Target Day)
+    # -----------------------------------------------------
     daily_data = ds_daily.sel(lat=dc_lat, lon=dc_lon, method='nearest').sel(time=slice(start_date, target_date)).load()
+    
     for prefix, var_name in [('day', 'DayTime_Avg_enthalpy'), ('night', 'NightTime_Avg_enthalpy')]:
         d_enth = daily_data[var_name].values
-        stats[f'{prefix}_surge_24'] = float(np.max(np.diff(d_enth))) if len(d_enth) > 1 else 0.0
-        stats[f'{prefix}_surge_48'] = float(np.max(d_enth[2:] - d_enth[:-2])) if len(d_enth) > 2 else 0.0
+        
+        # d_enth[-1] is the Target Day. d_enth[-2] is 1 day prior. d_enth[-3] is 2 days prior.
+        
+        # 24-hr surge (Target Day minus 1 day prior)
+        if len(d_enth) >= 2:
+            stats[f'{prefix}_surge_24'] = float(d_enth[-1] - d_enth[-2])
+        else:
+            stats[f'{prefix}_surge_24'] = 0.0
+            
+        # 48-hr surge (Target Day minus 2 days prior)
+        if len(d_enth) >= 3:
+            stats[f'{prefix}_surge_48'] = float(d_enth[-1] - d_enth[-3])
+        else:
+            stats[f'{prefix}_surge_48'] = 0.0
             
     ds_hourly.close(); ds_thresh.close(); ds_daily.close()
     return stats
