@@ -181,6 +181,8 @@
 # os.makedirs(os.path.dirname(output_pdf), exist_ok=True)
 # plt.savefig(output_pdf, bbox_inches='tight', dpi=150)
 # plt.close()
+
+
 import os
 import numpy as np
 import pandas as pd
@@ -206,10 +208,23 @@ tx_thresh_nc = '/discover/nobackup/cmbreen/datacenters/texas_hourly/tx_daynight_
 locations_csv = '~/INNOVATE/im3_open_source_data_center_atlas_v2026.02.09.csv'
 output_pdf = '/discover/nobackup/cmbreen/datacenters/output_pdfs/Extreme_Enthalpy_Trends.pdf'
 
-va_ts = xr.open_dataset(va_nc)
-tx_ts = xr.open_dataset(tx_nc)
+# va_ts = xr.open_dataset(va_nc)
+# tx_ts = xr.open_dataset(tx_nc)
+# va_thresh = xr.open_dataset(va_thresh_nc)
+# tx_thresh = xr.open_dataset(tx_thresh_nc)
+
+# Open datasets and immediately drop duplicate time indices
+va_ts = xr.open_dataset(va_nc).drop_duplicates(dim='time')
+tx_ts = xr.open_dataset(tx_nc).drop_duplicates(dim='time')
+
 va_thresh = xr.open_dataset(va_thresh_nc)
 tx_thresh = xr.open_dataset(tx_thresh_nc)
+
+# Just in case the threshold files also accidentally retained a time dimension with duplicates
+if 'time' in va_thresh.dims:
+    va_thresh = va_thresh.drop_duplicates(dim='time')
+if 'time' in tx_thresh.dims:
+    tx_thresh = tx_thresh.drop_duplicates(dim='time')
 
 locations_df = pd.read_csv(locations_csv)
 
