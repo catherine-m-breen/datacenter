@@ -4,7 +4,6 @@ import os
 import glob
 
 def process_hourly_chunk(forcing_files, output_dir, lat_slice, lon_slice, prefix, chunk_name):
-    # Pass 1: Extract, calculate variables, and save HOURLY data
     out_filename = os.path.join(output_dir, f"{prefix}_{chunk_name}_hourly_derived.nc")
     
     if os.path.exists(out_filename):
@@ -35,7 +34,6 @@ def process_hourly_chunk(forcing_files, output_dir, lat_slice, lon_slice, prefix
     W = humidity / (1.0 - humidity)
     enthalpy = 1.006 * temp + W * (2501.0 + 1.86 * temp)
     
-    # Save the HOURLY data (No time shifting or resampling yet!)
     out_ds = xr.Dataset({
         'Tair_C': temp,
         'Qair': humidity,
@@ -53,12 +51,14 @@ def process_hourly_chunk(forcing_files, output_dir, lat_slice, lon_slice, prefix
 
 def process_state_full(base_path, output_dir, lat_slice, lon_slice, prefix, tz_name, utc_offset):
     os.makedirs(output_dir, exist_ok=True)
-    final_out = os.path.join(output_dir, f"{prefix}_Daily_DayNight_Summary_CORRECTED2.nc")
+    # Using the standard CORRECTED filename for the final production run
+    final_out = os.path.join(output_dir, f"{prefix}_Daily_DayNight_Summary_CORRECTED.nc")
 
     if os.path.exists(final_out):
         print(f"Final file {final_out} already exists! Skipping {prefix.upper()}.")
         return
 
+    # Process ALL chunks (removed the [:6] slice)
     chunk_dirs = sorted(glob.glob(os.path.join(base_path, '2*')))
     hourly_files = []
 
@@ -80,19 +80,15 @@ def process_state_full(base_path, output_dir, lat_slice, lon_slice, prefix, tz_n
     print(f"\n--- PHASE 2: Time Shifting & Resampling on Full Continuous Dataset ---")
     
     # Load all intermediate hourly files into one continuous timeline
-    # ds_full = xr.open_mfdataset(hourly_files, combine='by_coords', parallel=False)
-        # ds_full = xr.open_mfdataset(hourly_files, combine='by_coords', parallel=False)
     ds_full = xr.open_mfdataset(
         hourly_files, 
-        combine='nested',       # Use nested list structure rather than auto-coord matching
-        concat_dim='time',      # Explicitly state we are concatenating through time
-        join='override',        # Force strict alignment of lat/lon without checking for floating point drift
+        combine='nested',       
+        concat_dim='time',      
+        join='override',        
         parallel=False
     )
     
-    # Because we heavily spatially cropped this, it is easily small enough to load entirely into RAM.
-    # Loading it into memory makes the resample process blazingly fast.
-    print("Loading full hourly dataset into memory...")
+    print("Loading full hourly dataset into memory (this will be fast)...")
     ds_full = ds_full.load()
     
     # --- 1. TIMEZONE SHIFT ---
@@ -138,19 +134,14 @@ def process_state_full(base_path, output_dir, lat_slice, lon_slice, prefix, tz_n
     out_ds['DayTime_Avg_Tair'].attrs = {'units': 'Celsius'}
     out_ds['NightTime_Avg_Tair'].attrs = {'units': 'Celsius'}
 
-    # We still keep dropna here, but now it will ONLY drop the very absolute 
-    # first and last day of the entire 26-year record, as they are genuinely incomplete
-    out_ds = out_ds.dropna(dim='time', subset=['DayTime_Avg_Tair', 'NightTime_Avg_Tair'], how='any')
+    # Using how='all' to safely drop only days where the ENTIRE grid is empty (the boundaries)
+    print("Trimming empty boundary days...")
+    out_ds = out_ds.dropna(dim='time', subset=['DayTime_Avg_Tair', 'NightTime_Avg_Tair'], how='all')
 
     print(f"Saving final dataset to {final_out}...")
     writing_filename = final_out + ".writing"
     out_ds.to_netcdf(writing_filename)
     os.rename(writing_filename, final_out)
-    
-    # Optional: Delete intermediate hourly files
-    # print("Cleaning up temporary files...")
-    # for f in hourly_files:
-    #     os.remove(f)
 
     ds_full.close()
     out_ds.close()
@@ -160,12 +151,13 @@ def process_state_full(base_path, output_dir, lat_slice, lon_slice, prefix, tz_n
 if __name__ == "__main__":
     base_forcing_path = '/discover/nobackup/projects/eis_nldas3/DATA/forcing/hourly'
 
+    
     # TEXAS
     process_state_full(
         base_path=base_forcing_path,
         output_dir='/discover/nobackup/cmbreen/datacenters/texas_hourly',
-        lat_slice=slice(32.3, 33.3),
-        lon_slice=slice(-97.5, -96.5),
+        lat_slice=slice(29.0, 34.0),
+        lon_slice=slice(-100.0, -95.0),
         prefix='tx',
         tz_name='Central Standard Time',
         utc_offset=-6
