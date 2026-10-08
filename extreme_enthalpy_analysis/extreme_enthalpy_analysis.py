@@ -319,6 +319,14 @@ va_thresh_pts = load_or_extract(va_thresh, va_lons, va_lats, va_thresh_cache)
 tx_thresh_pts = load_or_extract(tx_thresh, tx_lons, tx_lats, tx_thresh_cache)
 
 # ==========================================
+# SUPER QUICK FILTER (2-YEAR TEST)
+# ==========================================
+print("Applying 2-year filter for quick testing (2011-2012)...")
+va_pts = va_pts.sel(time=slice('2011-01-01', '2012-12-31'))
+tx_pts = tx_pts.sel(time=slice('2011-01-01', '2012-12-31'))
+
+
+# ==========================================
 # 3. PLOT MULTI-PAGE PDF & DEBUG
 # ==========================================
 print("Generating trend plots into Multi-Page PDF...")
