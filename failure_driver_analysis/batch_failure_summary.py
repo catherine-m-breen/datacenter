@@ -164,9 +164,14 @@ def plot_datacenter_heat_map_tx(ax, target_date, df, ds_path, dc_id=None, is_sum
     ax.scatter(non_aws_dcs['lon'], non_aws_dcs['lat'], c='grey', s=20, alpha=0.7, edgecolor='whitesmoke', linewidth=0.5, zorder=3)
     ax.scatter(aws_dcs['lon'], aws_dcs['lat'], c='black', s=40, marker='^', edgecolor='white', linewidth=0.8, zorder=4)
 
+    # if not is_summary and dc_id:
+    #     t_lat, t_lon = target_dc['lat'].values[0], target_dc['lon'].values[0]
+    #     ax.add_patch(patches.Rectangle((t_lon - 0.04), t_lat - 0.04, 0.08, 0.08, linewidth=2.5, edgecolor='purple', facecolor='none', zorder=6))
+
     if not is_summary and dc_id:
         t_lat, t_lon = target_dc['lat'].values[0], target_dc['lon'].values[0]
-        ax.add_patch(patches.Rectangle((t_lon - 0.04), t_lat - 0.04, 0.08, 0.08, linewidth=2.5, edgecolor='purple', facecolor='none', zorder=6))
+        # Fixed parentheses: (t_lon - 0.04, t_lat - 0.04) are now grouped together as a tuple
+        ax.add_patch(patches.Rectangle((t_lon - 0.04, t_lat - 0.04), 0.08, 0.08, linewidth=2.5, edgecolor='purple', facecolor='none', zorder=6))
 
     def format_lon(x, pos): return f"{abs(x):g}°W" if x < 0 else f"{x:g}°E"
     def format_lat(x, pos): return f"{x:g}°N" if x > 0 else f"{abs(x):g}°S"
