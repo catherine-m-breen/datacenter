@@ -206,7 +206,7 @@ tx_thresh_nc = '/discover/nobackup/cmbreen/datacenters/texas_hourly/tx_daynight_
 
 # Locations & Output
 locations_csv = '~/INNOVATE/im3_open_source_data_center_atlas_v2026.02.09.csv'
-output_pdf = '/discover/nobackup/cmbreen/datacenters/output_pdfs/Extreme_Enthalpy_Trends2.pdf'
+output_pdf = '/discover/nobackup/cmbreen/datacenters/output_pdfs/Extreme_Enthalpy_Trends2_TEST.pdf'
 
 # va_ts = xr.open_dataset(va_nc)
 # tx_ts = xr.open_dataset(tx_nc)
@@ -451,8 +451,14 @@ with PdfPages(output_pdf) as pdf:
                     # X-Axis formatting (Bottom row only)
                     if row_idx == 1:
                         min_yr, max_yr = int(counts.index.min()), int(counts.index.max())
+                        # ax.set_xlim(min_yr - 0.5, max_yr + 0.5)
+
                         ax.set_xlim(min_yr - 0.5, max_yr + 0.5)
-                        ax.set_xticks(range(min_yr, max_yr + 1, 5))
+                        # Dynamic tick spacing: 1 year for the 2-year test, 5 years for the full run
+                        step = 1 if (max_yr - min_yr) <= 5 else 5
+                        ax.set_xticks(range(min_yr, max_yr + 1, step))
+
+                        # ax.set_xticks(range(min_yr, max_yr + 1, 5))
                         ax.set_xlabel('Year', fontsize=14)
                     else:
                         ax.set_xticklabels([])
