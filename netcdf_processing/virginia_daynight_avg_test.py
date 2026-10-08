@@ -136,6 +136,7 @@ def process_state_full(base_path, output_dir, lat_slice, lon_slice, prefix, tz_n
     out_ds['NightTime_Avg_Tair'].attrs = {'units': 'Celsius'}
 
     # We drop any genuinely incomplete days
+    #out_ds = out_ds.dropna(dim='time', subset=['DayTime_Avg_Tair', 'NightTime_Avg_Tair'], how='any')
     out_ds = out_ds.dropna(dim='time', subset=['DayTime_Avg_Tair', 'NightTime_Avg_Tair'], how='any')
 
     print(f"Saving final dataset to {final_out}...")
