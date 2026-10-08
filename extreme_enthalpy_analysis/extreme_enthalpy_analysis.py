@@ -206,7 +206,7 @@ tx_thresh_nc = '/discover/nobackup/cmbreen/datacenters/texas_hourly/tx_daynight_
 
 # Locations & Output
 locations_csv = '~/INNOVATE/im3_open_source_data_center_atlas_v2026.02.09.csv'
-output_pdf = '/discover/nobackup/cmbreen/datacenters/output_pdfs/Extreme_Enthalpy_Trends.pdf'
+output_pdf = '/discover/nobackup/cmbreen/datacenters/output_pdfs/Extreme_Enthalpy_Trends2.pdf'
 
 # va_ts = xr.open_dataset(va_nc)
 # tx_ts = xr.open_dataset(tx_nc)
