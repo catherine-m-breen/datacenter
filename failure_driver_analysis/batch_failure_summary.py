@@ -77,14 +77,20 @@ ASHRAE_CLASSES = [
 def compute_threshold_stats(daily_path, hourly_path, thresh_path, target_date_str, dc_lat, dc_lon):
     target_date = pd.to_datetime(target_date_str)
     start_date = target_date - pd.Timedelta(days=14)
-    end_date_stats = target_date - pd.Timedelta(hours=1) 
+    
+    # We need hourly data through the END of the target date to get "Day Of" stats
+    end_date_full = target_date + pd.Timedelta(hours=23) 
     
     ds_hourly = xr.open_dataset(hourly_path)
     ds_thresh = xr.open_dataset(thresh_path)
-    ds_daily = xr.open_dataset(daily_path) 
     
-    hourly_data = ds_hourly.sel(lat=dc_lat, lon=dc_lon, method='nearest').sel(time=slice(start_date, end_date_stats)).load()
-    enth = hourly_data.enthalpy.values
+    # Load all hourly data needed
+    hourly_data = ds_hourly.sel(lat=dc_lat, lon=dc_lon, method='nearest').sel(time=slice(start_date, end_date_full)).load()
+    
+    # Get 14-day history prior to target day for the crossing stats
+    history_data = hourly_data.sel(time=slice(start_date, target_date - pd.Timedelta(hours=1)))
+    enth_history = history_data.enthalpy.values
+    
     month_str = target_date.strftime('%Y-%m')
     monthly_thresh = ds_thresh.sel(lat=dc_lat, lon=dc_lon, quantile=0.90, method='nearest').sel(time=month_str).mean(dim='time')
     
@@ -93,48 +99,39 @@ def compute_threshold_stats(daily_path, hourly_path, thresh_path, target_date_st
     
     stats = {'day_val': day_t, 'night_val': night_t, 'day_hours': 0, 'day_cross': 0, 'night_hours': 0, 'night_cross': 0}
     
-    if len(enth) > 0:
-        enth_diff = np.diff(enth)
+    # 1. Calculate 14-Day Event Crossings
+    if len(enth_history) > 0:
+        enth_diff = np.diff(enth_history)
         stats['max_hourly_jump'] = float(np.max(enth_diff)) if len(enth_diff) > 0 else 0.0
         for thresh, prefix in [(day_t, 'day'), (night_t, 'night')]:
-            above = (enth > thresh).astype(int)
+            above = (enth_history > thresh).astype(int)
             stats[f'{prefix}_hours'] = int(np.sum(above))
             crossings = np.sum(np.diff(above) == 1)
             if above[0] == 1: crossings += 1 
             stats[f'{prefix}_cross'] = int(crossings)
-            
-    # daily_data = ds_daily.sel(lat=dc_lat, lon=dc_lon, method='nearest').sel(time=slice(start_date, target_date)).load()
-    # for prefix, var_name in [('day', 'DayTime_Avg_enthalpy'), ('night', 'NightTime_Avg_enthalpy')]:
-    #     d_enth = daily_data[var_name].values
-    #     stats[f'{prefix}_surge_24'] = float(np.max(np.diff(d_enth))) if len(d_enth) > 1 else 0.0
-    #     stats[f'{prefix}_surge_48'] = float(np.max(d_enth[2:] - d_enth[:-2])) if len(d_enth) > 2 else 0.0
-            
-    # ds_hourly.close(); ds_thresh.close(); ds_daily.close()
-    # return stats
 
+    # 2. Hourly Surges (Max - Min Enthalpy)
     # -----------------------------------------------------
-    # 2. Daily Stats (24-hr and 48-hr Surge leading into Target Day)
-    # -----------------------------------------------------
-    daily_data = ds_daily.sel(lat=dc_lat, lon=dc_lon, method='nearest').sel(time=slice(start_date, target_date)).load()
+    # Day Before: target_date minus 1 day (e.g., 00:00 to 23:00 yesterday)
+    day_before_start = target_date - pd.Timedelta(days=1)
+    day_before_end = target_date - pd.Timedelta(hours=1)
+    enth_day_before = hourly_data.sel(time=slice(day_before_start, day_before_end)).enthalpy.values
     
-    for prefix, var_name in [('day', 'DayTime_Avg_enthalpy'), ('night', 'NightTime_Avg_enthalpy')]:
-        d_enth = daily_data[var_name].values
+    if len(enth_day_before) > 0:
+        stats['surge_day_before'] = float(np.max(enth_day_before) - np.min(enth_day_before))
+    else:
+        stats['surge_day_before'] = 0.0
         
-        # d_enth[-1] is the Target Day. d_enth[-2] is 1 day prior. d_enth[-3] is 2 days prior.
-        
-        # 24-hr surge (Target Day minus 1 day prior)
-        if len(d_enth) >= 2:
-            stats[f'{prefix}_surge_24'] = float(d_enth[-1] - d_enth[-2])
-        else:
-            stats[f'{prefix}_surge_24'] = 0.0
+    # Day Of: target_date 00:00 to 23:00 today
+    day_of_end = target_date + pd.Timedelta(hours=23)
+    enth_day_of = hourly_data.sel(time=slice(target_date, day_of_end)).enthalpy.values
+    
+    if len(enth_day_of) > 0:
+        stats['surge_day_of'] = float(np.max(enth_day_of) - np.min(enth_day_of))
+    else:
+        stats['surge_day_of'] = 0.0
             
-        # 48-hr surge (Target Day minus 2 days prior)
-        if len(d_enth) >= 3:
-            stats[f'{prefix}_surge_48'] = float(d_enth[-1] - d_enth[-3])
-        else:
-            stats[f'{prefix}_surge_48'] = 0.0
-            
-    ds_hourly.close(); ds_thresh.close(); ds_daily.close()
+    ds_hourly.close(); ds_thresh.close()
     return stats
 
 # ==========================================
@@ -405,14 +402,18 @@ def draw_table(ax_table, stats, title):
     n_val = f"{stats['night_val']:.1f}" if np.isfinite(stats['night_val']) else "N/A"
     d_avg = f"{stats['day_hours'] / stats['day_cross']:.1f}" if stats['day_cross'] > 0 else "0.0"
     n_avg = f"{stats['night_hours'] / stats['night_cross']:.1f}" if stats['night_cross'] > 0 else "0.0"
-    d_24, d_48 = f"+{max(0, stats['day_surge_24']):.1f}", f"+{max(0, stats['day_surge_48']):.1f}"
-    n_24, n_48 = f"+{max(0, stats['night_surge_24']):.1f}", f"+{max(0, stats['night_surge_48']):.1f}"
+    
+    # Grab the new hourly max-min surge metrics
+    s_before = f"+{stats['surge_day_before']:.1f}"
+    s_of = f"+{stats['surge_day_of']:.1f}"
     
     table_data = [
-        ['Daytime', d_val, f"{stats['day_cross']:.0f}", f"{stats['day_hours']:.0f}", d_avg, d_48, d_24],
-        ['Nighttime', n_val, f"{stats['night_cross']:.0f}", f"{stats['night_hours']:.0f}", n_avg, n_48, n_24]
+        ['Daytime', d_val, f"{stats['day_cross']:.0f}", f"{stats['day_hours']:.0f}", d_avg, s_before, s_of],
+        ['Nighttime', n_val, f"{stats['night_cross']:.0f}", f"{stats['night_hours']:.0f}", n_avg, s_before, s_of]
     ]
-    col_labels = ['Period', 'Threshold \n (kJ/kg)', 'Events \n (Crossings)', 'Total Hours \n Exceeded', 'Avg Hours / \n Event', '48-hr surge', '24-hr surge']
+    
+    # Updated column labels
+    col_labels = ['Period', 'Threshold \n (kJ/kg)', 'Events \n (Crossings)', 'Total Hours \n Exceeded', 'Avg Hours / \n Event', 'Day Before \n Range (Max-Min)', 'Day Of \n Range (Max-Min)']
 
     ax_table.set_title(title, fontsize=10, fontweight='bold', pad=5)
     table = ax_table.table(cellText=table_data, colLabels=col_labels, loc='center', cellLoc='center', bbox=[0, 0, 1, 1])
@@ -422,6 +423,7 @@ def draw_table(ax_table, stats, title):
         if i == 0: cell.set_text_props(weight='bold', color='white'); cell.set_facecolor('#4c4c4c')
         else: cell.set_facecolor('#f2f2f2' if i % 2 == 0 else 'white')
 
+        
 def get_file_paths(state_abb):
     if state_abb == 'VA':
         return ('/discover/nobackup/cmbreen/datacenters/virginia_hourly/va_Daily_DayNight_Summary_CORRECTED.nc',
