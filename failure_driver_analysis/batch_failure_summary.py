@@ -97,22 +97,31 @@ def compute_threshold_stats(daily_path, hourly_path, thresh_path, target_date_st
     day_t = float(monthly_thresh.DayTime_Avg_enthalpy_thresholds.values)
     night_t = float(monthly_thresh.NightTime_Avg_enthalpy_thresholds.values)
     
-    stats = {'day_val': day_t, 'night_val': night_t, 'day_hours': 0, 'day_cross': 0, 'night_hours': 0, 'night_cross': 0}
+    stats = {'day_val': day_t, 'night_val': night_t, 'day_hours': 0, 'day_cross': 0, 'night_hours': 0, 'night_cross': 0, 'day_max_sustained': 0, 'night_max_sustained': 0}
     
-    # 1. Calculate 14-Day Event Crossings
+    # 1. Calculate 14-Day Event Crossings & Sustained Hours
     if len(enth_history) > 0:
         enth_diff = np.diff(enth_history)
         stats['max_hourly_jump'] = float(np.max(enth_diff)) if len(enth_diff) > 0 else 0.0
         for thresh, prefix in [(day_t, 'day'), (night_t, 'night')]:
             above = (enth_history > thresh).astype(int)
             stats[f'{prefix}_hours'] = int(np.sum(above))
+            
+            # Count distinct crossings
             crossings = np.sum(np.diff(above) == 1)
             if above[0] == 1: crossings += 1 
             stats[f'{prefix}_cross'] = int(crossings)
+            
+            # Find the max sustained hours (longest continuous streak of 1s)
+            padded = np.pad(above, (1, 1), mode='constant')
+            starts = np.where(np.diff(padded) == 1)[0]
+            ends = np.where(np.diff(padded) == -1)[0]
+            lengths = ends - starts
+            stats[f'{prefix}_max_sustained'] = int(np.max(lengths)) if len(lengths) > 0 else 0
 
     # 2. Hourly Surges (Max - Min Enthalpy)
     # -----------------------------------------------------
-    # Day Before: target_date minus 1 day (e.g., 00:00 to 23:00 yesterday)
+    # Day Before: target_date minus 1 day
     day_before_start = target_date - pd.Timedelta(days=1)
     day_before_end = target_date - pd.Timedelta(hours=1)
     enth_day_before = hourly_data.sel(time=slice(day_before_start, day_before_end)).enthalpy.values
@@ -400,20 +409,25 @@ def plot_rh_seasonal_envelope(axes, nc_path, target_date_str, df, dc_id=None, is
 def draw_table(ax_table, stats, title):
     d_val = f"{stats['day_val']:.1f}" if np.isfinite(stats['day_val']) else "N/A"
     n_val = f"{stats['night_val']:.1f}" if np.isfinite(stats['night_val']) else "N/A"
+    
     d_avg = f"{stats['day_hours'] / stats['day_cross']:.1f}" if stats['day_cross'] > 0 else "0.0"
     n_avg = f"{stats['night_hours'] / stats['night_cross']:.1f}" if stats['night_cross'] > 0 else "0.0"
     
-    # Grab the new hourly max-min surge metrics
+    d_sust = f"{stats['day_max_sustained']:.1f}"
+    n_sust = f"{stats['night_max_sustained']:.1f}"
+    
     s_before = f"+{stats['surge_day_before']:.1f}"
     s_of = f"+{stats['surge_day_of']:.1f}"
     
     table_data = [
-        ['Daytime', d_val, f"{stats['day_cross']:.0f}", f"{stats['day_hours']:.0f}", d_avg, s_before, s_of],
-        ['Nighttime', n_val, f"{stats['night_cross']:.0f}", f"{stats['night_hours']:.0f}", n_avg, s_before, s_of]
+        ['Daytime', d_val, f"{stats['day_cross']:.0f}", f"{stats['day_hours']:.0f}", d_avg, d_sust, s_before, s_of],
+        ['Nighttime', n_val, f"{stats['night_cross']:.0f}", f"{stats['night_hours']:.0f}", n_avg, n_sust, s_before, s_of]
     ]
     
-    # Updated column labels
-    col_labels = ['Period', 'Threshold \n (kJ/kg)', 'Events \n (Crossings)', 'Total Hours \n Exceeded', 'Avg Hours / \n Event', 'Day Before \n Range (Max-Min)', 'Day Of \n Range (Max-Min)']
+    col_labels = [
+        'Period', 'Threshold \n (kJ/kg)', 'Events \n (Crossings)', 'Total Hours \n Exceeded', 
+        'Avg Hours / \n Event', 'Max Sustained \n Hours (Peak)', 'Day Before \n Range (Max-Min)', 'Day Of \n Range (Max-Min)'
+    ]
 
     ax_table.set_title(title, fontsize=10, fontweight='bold', pad=5)
     table = ax_table.table(cellText=table_data, colLabels=col_labels, loc='center', cellLoc='center', bbox=[0, 0, 1, 1])
