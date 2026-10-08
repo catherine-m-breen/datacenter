@@ -207,15 +207,19 @@ def plot_failure_event_with_baselines(axes, ds_path, thresh_path, target_date_st
         times = event_data.time.values
         monthly_thresh = ds_thresh.sel(lat=dc_lat, lon=dc_lon, quantile=0.90, method='nearest').sel(time=month_str).mean(dim='time')
 
+    # CREATE DAYTIME SHIFT (Shift daytime values forward by 12 hours so they plot at 12 PM)
+    day_times = times + pd.Timedelta(hours=12)
+
     # Plotting Lines and Ribbons
     # 1. Temp
-    ax1.plot(times, m_data.DayTime_Avg_Tair, label='Day Avg', color='darkorange', linewidth=2)
+    ax1.plot(day_times, m_data.DayTime_Avg_Tair, label='Day Avg', color='darkorange', linewidth=2)
     ax1.plot(times, m_data.NightTime_Avg_Tair, label='Night Avg', color='purple', linewidth=2)
+    
     if is_summary:
-        ax1.fill_between(times, m_data.DayTime_Avg_Tair - s_data.DayTime_Avg_Tair, m_data.DayTime_Avg_Tair + s_data.DayTime_Avg_Tair, color='darkorange', alpha=0.2)
+        ax1.fill_between(day_times, m_data.DayTime_Avg_Tair - s_data.DayTime_Avg_Tair, m_data.DayTime_Avg_Tair + s_data.DayTime_Avg_Tair, color='darkorange', alpha=0.2)
         ax1.fill_between(times, m_data.NightTime_Avg_Tair - s_data.NightTime_Avg_Tair, m_data.NightTime_Avg_Tair + s_data.NightTime_Avg_Tair, color='purple', alpha=0.2)
     else:
-        ax1.plot(times, event_data.DayTime_Tair_max, label='Day Max', color='firebrick', linestyle='--', alpha=0.4)
+        ax1.plot(day_times, event_data.DayTime_Tair_max, label='Day Max', color='firebrick', linestyle='--', alpha=0.4)
         ax1.plot(times, event_data.NightTime_Tair_max, label='Night Max', color='indigo', linestyle='--', alpha=0.4)
     
     ax1.set_ylabel('Temp (°C)', fontsize=9)
@@ -224,11 +228,11 @@ def plot_failure_event_with_baselines(axes, ds_path, thresh_path, target_date_st
     ax1.set_ylim(10, 50); ax1.grid(True, alpha=0.3)
 
     # 2. Enthalpy
-    ax2.plot(times, m_data.DayTime_Avg_enthalpy, color='darkorange', linewidth=2, label='Day Enthalpy')
+    ax2.plot(day_times, m_data.DayTime_Avg_enthalpy, color='darkorange', linewidth=2, label='Day Enthalpy')
     ax2.plot(times, m_data.NightTime_Avg_enthalpy, color='purple', linewidth=2, label='Night Enthalpy')
     
     if is_summary:
-        ax2.fill_between(times, m_data.DayTime_Avg_enthalpy - s_data.DayTime_Avg_enthalpy, m_data.DayTime_Avg_enthalpy + s_data.DayTime_Avg_enthalpy, color='darkorange', alpha=0.2)
+        ax2.fill_between(day_times, m_data.DayTime_Avg_enthalpy - s_data.DayTime_Avg_enthalpy, m_data.DayTime_Avg_enthalpy + s_data.DayTime_Avg_enthalpy, color='darkorange', alpha=0.2)
         ax2.fill_between(times, m_data.NightTime_Avg_enthalpy - s_data.NightTime_Avg_enthalpy, m_data.NightTime_Avg_enthalpy + s_data.NightTime_Avg_enthalpy, color='purple', alpha=0.2)
         
         # Add Thresholds (0.90, 0.95, 0.99)
@@ -259,17 +263,20 @@ def plot_failure_event_with_baselines(axes, ds_path, thresh_path, target_date_st
     ax2.set_ylim(20, 95); ax2.grid(True, alpha=0.3)
 
     # 3. Humidity
-    ax3.plot(times, m_data.DayTime_Avg_Qair, color='darkorange', linewidth=2)
+    ax3.plot(day_times, m_data.DayTime_Avg_Qair, color='darkorange', linewidth=2)
     ax3.plot(times, m_data.NightTime_Avg_Qair, color='purple', linewidth=2)
+    
     if is_summary:
-        ax3.fill_between(times, m_data.DayTime_Avg_Qair - s_data.DayTime_Avg_Qair, m_data.DayTime_Avg_Qair + s_data.DayTime_Avg_Qair, color='darkorange', alpha=0.2)
+        ax3.fill_between(day_times, m_data.DayTime_Avg_Qair - s_data.DayTime_Avg_Qair, m_data.DayTime_Avg_Qair + s_data.DayTime_Avg_Qair, color='darkorange', alpha=0.2)
         ax3.fill_between(times, m_data.NightTime_Avg_Qair - s_data.NightTime_Avg_Qair, m_data.NightTime_Avg_Qair + s_data.NightTime_Avg_Qair, color='purple', alpha=0.2)
         
     ax3.set_ylabel('Qair (kg/kg)', fontsize=9)
     ax3.set_ylim(0.005, 0.02) 
     ax3.grid(True, alpha=0.3)
 
-    for ax in axes: ax.axvspan(target_date, target_date + pd.Timedelta(days=1), color='red', alpha=0.15)
+    for ax in axes: 
+        ax.axvspan(target_date, target_date + pd.Timedelta(days=1), color='red', alpha=0.15)
+        
     ax3.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'))
     ds.close(); ds_thresh.close()
 
