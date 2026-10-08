@@ -526,7 +526,6 @@ def compute_threshold_stats(daily_path, hourly_path, thresh_path, target_date_st
     ds_hourly.close(); ds_thresh.close(); ds_daily.close()
     return stats
 
-
 # ==========================================
 # 3. PDF GENERATION LOGIC 
 # ==========================================
