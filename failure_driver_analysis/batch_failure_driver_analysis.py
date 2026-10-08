@@ -428,16 +428,58 @@ def plot_rh_seasonal_envelope(axes, nc_path, target_date_str, dc_id, df):
 # 2. NEW: COMPUTE STATISTICS FOR THE TABLE
 # ==========================================
 
-def compute_threshold_stats(hourly_path, thresh_path, target_date_str, dc_lat, dc_lon):
-    """Calculates crossings, total hours, and the max hourly enthalpy jump strictly prior to the event."""
+# def compute_threshold_stats(hourly_path, thresh_path, target_date_str, dc_lat, dc_lon):
+#     """Calculates crossings, total hours, and the max hourly enthalpy jump strictly prior to the event."""
+#     target_date = pd.to_datetime(target_date_str)
+#     start_date = target_date - pd.Timedelta(days=14)
+#     # Stop calculating 1 hour before the event day begins
+#     end_date_stats = target_date - pd.Timedelta(hours=1) 
+    
+#     ds_hourly = xr.open_dataset(hourly_path)
+#     ds_thresh = xr.open_dataset(thresh_path)
+    
+#     hourly_data = ds_hourly.sel(lat=dc_lat, lon=dc_lon, method='nearest').sel(time=slice(start_date, end_date_stats)).load()
+#     enth = hourly_data.enthalpy.values
+    
+#     month_str = target_date.strftime('%Y-%m')
+#     monthly_thresh = ds_thresh.sel(lat=dc_lat, lon=dc_lon, quantile=0.90, method='nearest').sel(time=month_str).mean(dim='time')
+    
+#     day_t = float(monthly_thresh.DayTime_Avg_enthalpy_thresholds.values)
+#     night_t = float(monthly_thresh.NightTime_Avg_enthalpy_thresholds.values)
+    
+#     stats = {'day_val': day_t, 'night_val': night_t, 'day_hours': 0, 'day_cross': 0, 'night_hours': 0, 'night_cross': 0}
+    
+#     if len(enth) > 0:
+#         # NEW: Calculate the maximum positive hour-over-hour jump in enthalpy
+#         enth_diff = np.diff(enth)
+#         stats['max_hourly_jump'] = float(np.max(enth_diff)) if len(enth_diff) > 0 else 0.0
+
+#         for thresh, prefix in [(day_t, 'day'), (night_t, 'night')]:
+#             above = (enth > thresh).astype(int)
+#             stats[f'{prefix}_hours'] = int(np.sum(above))
+            
+#             # Count times it crossed the threshold (went from 0 to 1)
+#             crossings = np.sum(np.diff(above) == 1)
+#             if above[0] == 1: crossings += 1 # Count if it started the 14-day window already above
+#             stats[f'{prefix}_cross'] = int(crossings)
+            
+#     ds_hourly.close(); ds_thresh.close()
+#     return stats
+
+def compute_threshold_stats(daily_path, hourly_path, thresh_path, target_date_str, dc_lat, dc_lon):
+    """Calculates crossings, total hours, and the max 1hr, 24hr, and 48hr enthalpy jumps prior to the event."""
     target_date = pd.to_datetime(target_date_str)
     start_date = target_date - pd.Timedelta(days=14)
-    # Stop calculating 1 hour before the event day begins
+    # Stop calculating hourly crossings 1 hour before the event day begins
     end_date_stats = target_date - pd.Timedelta(hours=1) 
     
     ds_hourly = xr.open_dataset(hourly_path)
     ds_thresh = xr.open_dataset(thresh_path)
+    ds_daily = xr.open_dataset(daily_path) # NEW: load daily for the 24/48hr stats
     
+    # -----------------------------------------------------
+    # 1. Hourly Stats (Crossings & 1-hr surge)
+    # -----------------------------------------------------
     hourly_data = ds_hourly.sel(lat=dc_lat, lon=dc_lon, method='nearest').sel(time=slice(start_date, end_date_stats)).load()
     enth = hourly_data.enthalpy.values
     
@@ -450,7 +492,6 @@ def compute_threshold_stats(hourly_path, thresh_path, target_date_str, dc_lat, d
     stats = {'day_val': day_t, 'night_val': night_t, 'day_hours': 0, 'day_cross': 0, 'night_hours': 0, 'night_cross': 0}
     
     if len(enth) > 0:
-        # NEW: Calculate the maximum positive hour-over-hour jump in enthalpy
         enth_diff = np.diff(enth)
         stats['max_hourly_jump'] = float(np.max(enth_diff)) if len(enth_diff) > 0 else 0.0
 
@@ -458,14 +499,32 @@ def compute_threshold_stats(hourly_path, thresh_path, target_date_str, dc_lat, d
             above = (enth > thresh).astype(int)
             stats[f'{prefix}_hours'] = int(np.sum(above))
             
-            # Count times it crossed the threshold (went from 0 to 1)
             crossings = np.sum(np.diff(above) == 1)
-            if above[0] == 1: crossings += 1 # Count if it started the 14-day window already above
+            if above[0] == 1: crossings += 1 
             stats[f'{prefix}_cross'] = int(crossings)
             
-    ds_hourly.close(); ds_thresh.close()
+    # -----------------------------------------------------
+    # 2. Daily Stats (24-hr and 48-hr Surge)
+    # -----------------------------------------------------
+    daily_data = ds_daily.sel(lat=dc_lat, lon=dc_lon, method='nearest').sel(time=slice(start_date, target_date)).load()
+    
+    for prefix, var_name in [('day', 'DayTime_Avg_enthalpy'), ('night', 'NightTime_Avg_enthalpy')]:
+        d_enth = daily_data[var_name].values
+        
+        # 24-hr surge (max difference over 1 day)
+        if len(d_enth) > 1:
+            stats[f'{prefix}_surge_24'] = float(np.max(np.diff(d_enth)))
+        else:
+            stats[f'{prefix}_surge_24'] = 0.0
+            
+        # 48-hr surge (max difference over 2 days)
+        if len(d_enth) > 2:
+            stats[f'{prefix}_surge_48'] = float(np.max(d_enth[2:] - d_enth[:-2]))
+        else:
+            stats[f'{prefix}_surge_48'] = 0.0
+            
+    ds_hourly.close(); ds_thresh.close(); ds_daily.close()
     return stats
-
 
 
 # ==========================================
@@ -517,9 +576,40 @@ def generate_master_panel(pdf, dc_id, target_date, df, state_abb):
     
     plot_datacenter_heat_map_tx(ax_map, dc_id, target_date, df, daily_nc)
 
+    # # Calculate and draw Table
+    # dc_lat, dc_lon = df[df['id'] == dc_id]['lat'].values[0], df[df['id'] == dc_id]['lon'].values[0]
+    # stats = compute_threshold_stats(hourly_nc, thresh_nc, target_date, dc_lat, dc_lon)
+    
+    # # Format NaN thresholds neatly if they occur
+    # d_val = f"{stats['day_val']:.1f}" if np.isfinite(stats['day_val']) else "N/A"
+    # n_val = f"{stats['night_val']:.1f}" if np.isfinite(stats['night_val']) else "N/A"
+    
+    # # Calculate Average Hours per Event (avoiding division by zero)
+    # d_avg = f"{stats['day_hours'] / stats['day_cross']:.1f}" if stats['day_cross'] > 0 else "0.0"
+    # n_avg = f"{stats['night_hours'] / stats['night_cross']:.1f}" if stats['night_cross'] > 0 else "0.0"
+    
+    # table_data = [
+    #     ['Daytime', d_val, str(stats['day_cross']), str(stats['day_hours']), d_avg],
+    #     ['Nighttime', n_val, str(stats['night_cross']), str(stats['night_hours']), n_avg]
+    # ]
+    
+    # # Updated Headers to accommodate the new metric
+    # col_labels = ['Period', 'Threshold \n (kJ/kg)', 'Events \n (Crossings)', 'Total Hours \n Exceeded', 'Avg Hours / \n Event',
+    #               '48-hr surge', '24-hr surge']
+
+    # max_surge = stats.get('max_hourly_jump', 0.0)
+    # ax_table.set_title(f"14-Day Pre-Event Summary (Max Hourly Surge: +{max_surge:.1f} kJ/kg)", 
+    #                    fontsize=10, fontweight='bold', pad=5)
+    # table = ax_table.table(cellText=table_data, colLabels=col_labels, loc='center', cellLoc='center', bbox=[0, 0, 1, 1])
+    # table.auto_set_font_size(False)
+    # table.set_fontsize(6)
+    # table.scale(1, 1.5) # Add padding to cells
+
     # Calculate and draw Table
     dc_lat, dc_lon = df[df['id'] == dc_id]['lat'].values[0], df[df['id'] == dc_id]['lon'].values[0]
-    stats = compute_threshold_stats(hourly_nc, thresh_nc, target_date, dc_lat, dc_lon)
+    
+    # Pass daily_nc as the first argument
+    stats = compute_threshold_stats(daily_nc, hourly_nc, thresh_nc, target_date, dc_lat, dc_lon)
     
     # Format NaN thresholds neatly if they occur
     d_val = f"{stats['day_val']:.1f}" if np.isfinite(stats['day_val']) else "N/A"
@@ -529,20 +619,27 @@ def generate_master_panel(pdf, dc_id, target_date, df, state_abb):
     d_avg = f"{stats['day_hours'] / stats['day_cross']:.1f}" if stats['day_cross'] > 0 else "0.0"
     n_avg = f"{stats['night_hours'] / stats['night_cross']:.1f}" if stats['night_cross'] > 0 else "0.0"
     
+    # Format the new surges (Adding '+' to show it's a jump)
+    d_24 = f"+{max(0, stats['day_surge_24']):.1f}"
+    d_48 = f"+{max(0, stats['day_surge_48']):.1f}"
+    n_24 = f"+{max(0, stats['night_surge_24']):.1f}"
+    n_48 = f"+{max(0, stats['night_surge_48']):.1f}"
+    
+    # Append the surges to match your 7 column headers (Notice 48-hr comes before 24-hr)
     table_data = [
-        ['Daytime', d_val, str(stats['day_cross']), str(stats['day_hours']), d_avg],
-        ['Nighttime', n_val, str(stats['night_cross']), str(stats['night_hours']), n_avg]
+        ['Daytime', d_val, str(stats['day_cross']), str(stats['day_hours']), d_avg, d_48, d_24],
+        ['Nighttime', n_val, str(stats['night_cross']), str(stats['night_hours']), n_avg, n_48, n_24]
     ]
     
-    # Updated Headers to accommodate the new metric
-    col_labels = ['Period', 'Threshold \n (kJ/kg)', 'Events \n (Crossings)', 'Total Hours \n Exceeded', 'Avg Hours / \n Event']
+    col_labels = ['Period', 'Threshold \n (kJ/kg)', 'Events \n (Crossings)', 'Total Hours \n Exceeded', 'Avg Hours / \n Event',
+                  '48-hr surge', '24-hr surge']
 
     max_surge = stats.get('max_hourly_jump', 0.0)
     ax_table.set_title(f"14-Day Pre-Event Summary (Max Hourly Surge: +{max_surge:.1f} kJ/kg)", 
                        fontsize=10, fontweight='bold', pad=5)
     table = ax_table.table(cellText=table_data, colLabels=col_labels, loc='center', cellLoc='center', bbox=[0, 0, 1, 1])
     table.auto_set_font_size(False)
-    table.set_fontsize(9)
+    table.set_fontsize(6)
     table.scale(1, 1.5) # Add padding to cells
     
     for (i, j), cell in table.get_celld().items():
