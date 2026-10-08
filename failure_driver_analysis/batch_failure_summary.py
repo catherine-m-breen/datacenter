@@ -213,20 +213,20 @@ def plot_failure_event_with_baselines(axes, ds_path, thresh_path, target_date_st
         times = event_data.time.values
         monthly_thresh = ds_thresh.sel(lat=dc_lat, lon=dc_lon, quantile=0.90, method='nearest').sel(time=month_str).mean(dim='time')
 
-    # CREATE DAYTIME SHIFT (Shift daytime values forward by 12 hours so they plot at 12 PM)
+    # CREATE DAYTIME SHIFT
     day_times = times + pd.Timedelta(hours=12)
 
-    # Plotting Lines and Ribbons
     # 1. Temp
     ax1.plot(day_times, m_data.DayTime_Avg_Tair, label='Day Avg', color='darkorange', linewidth=2)
     ax1.plot(times, m_data.NightTime_Avg_Tair, label='Night Avg', color='purple', linewidth=2)
     
     if is_summary:
-        ax1.fill_between(day_times, m_data.DayTime_Avg_Tair - s_data.DayTime_Avg_Tair, m_data.DayTime_Avg_Tair + s_data.DayTime_Avg_Tair, color='darkorange', alpha=0.2)
-        ax1.fill_between(times, m_data.NightTime_Avg_Tair - s_data.NightTime_Avg_Tair, m_data.NightTime_Avg_Tair + s_data.NightTime_Avg_Tair, color='purple', alpha=0.2)
+        # UPDATED: alpha=0.5
+        ax1.fill_between(day_times, m_data.DayTime_Avg_Tair - s_data.DayTime_Avg_Tair, m_data.DayTime_Avg_Tair + s_data.DayTime_Avg_Tair, color='darkorange', alpha=0.5)
+        ax1.fill_between(times, m_data.NightTime_Avg_Tair - s_data.NightTime_Avg_Tair, m_data.NightTime_Avg_Tair + s_data.NightTime_Avg_Tair, color='purple', alpha=0.5)
     else:
-        ax1.plot(day_times, event_data.DayTime_Tair_max, label='Day Max', color='firebrick', linestyle='--', alpha=0.4)
-        ax1.plot(times, event_data.NightTime_Tair_max, label='Night Max', color='indigo', linestyle='--', alpha=0.4)
+        ax1.plot(day_times, event_data.DayTime_Tair_max, label='Day Max', color='firebrick', linestyle='--', alpha=0.5)
+        ax1.plot(times, event_data.NightTime_Tair_max, label='Night Max', color='indigo', linestyle='--', alpha=0.5)
     
     ax1.set_ylabel('Temp (°C)', fontsize=9)
     ax1.set_title('Daily Build-up (14 Days Prior)' if not is_summary else 'Statewide Daily Build-up (Mean ± 1 SD)', fontsize=12, fontweight='bold')
@@ -238,10 +238,10 @@ def plot_failure_event_with_baselines(axes, ds_path, thresh_path, target_date_st
     ax2.plot(times, m_data.NightTime_Avg_enthalpy, color='purple', linewidth=2, label='Night Enthalpy')
     
     if is_summary:
-        ax2.fill_between(day_times, m_data.DayTime_Avg_enthalpy - s_data.DayTime_Avg_enthalpy, m_data.DayTime_Avg_enthalpy + s_data.DayTime_Avg_enthalpy, color='darkorange', alpha=0.2)
-        ax2.fill_between(times, m_data.NightTime_Avg_enthalpy - s_data.NightTime_Avg_enthalpy, m_data.NightTime_Avg_enthalpy + s_data.NightTime_Avg_enthalpy, color='purple', alpha=0.2)
+        # UPDATED: alpha=0.5
+        ax2.fill_between(day_times, m_data.DayTime_Avg_enthalpy - s_data.DayTime_Avg_enthalpy, m_data.DayTime_Avg_enthalpy + s_data.DayTime_Avg_enthalpy, color='darkorange', alpha=0.5)
+        ax2.fill_between(times, m_data.NightTime_Avg_enthalpy - s_data.NightTime_Avg_enthalpy, m_data.NightTime_Avg_enthalpy + s_data.NightTime_Avg_enthalpy, color='purple', alpha=0.5)
         
-        # Add Thresholds (0.90, 0.95, 0.99)
         monthly_t_all = ds_thresh.sel(lat=lats, lon=lons, method='nearest').sel(time=month_str).mean(dim='time')
         d_c, n_c = {0.90: 'darkorange', 0.95: 'orangered', 0.99: 'red'}, {0.90: 'mediumpurple', 0.95: 'blueviolet', 0.99: 'indigo'}
         for q in [0.90, 0.95, 0.99]:
@@ -250,12 +250,11 @@ def plot_failure_event_with_baselines(axes, ds_path, thresh_path, target_date_st
                 d_m, d_s = q_d.DayTime_Avg_enthalpy_thresholds.mean(dim='points').values, q_d.DayTime_Avg_enthalpy_thresholds.std(dim='points').values
                 n_m, n_s = q_d.NightTime_Avg_enthalpy_thresholds.mean(dim='points').values, q_d.NightTime_Avg_enthalpy_thresholds.std(dim='points').values
                 ax2.axhline(d_m, color=d_c[q], linestyle='-.', alpha=0.7)
-                ax2.axhspan(d_m - d_s, d_m + d_s, color=d_c[q], alpha=0.1)
+                ax2.axhspan(d_m - d_s, d_m + d_s, color=d_c[q], alpha=0.15)
                 ax2.axhline(n_m, color=n_c[q], linestyle='-.', alpha=0.7)
-                ax2.axhspan(n_m - n_s, n_m + n_s, color=n_c[q], alpha=0.1)
+                ax2.axhspan(n_m - n_s, n_m + n_s, color=n_c[q], alpha=0.15)
             except: pass
         
-        # Add ASHRAE Lines
         for ac in ASHRAE_CLASSES:
             h_max = get_max_enthalpy(ac['t'][1], ac['dp'][1])
             ax2.axhline(h_max, color=ac['color'], linestyle=':', linewidth=1.5)
@@ -273,8 +272,9 @@ def plot_failure_event_with_baselines(axes, ds_path, thresh_path, target_date_st
     ax3.plot(times, m_data.NightTime_Avg_Qair, color='purple', linewidth=2)
     
     if is_summary:
-        ax3.fill_between(day_times, m_data.DayTime_Avg_Qair - s_data.DayTime_Avg_Qair, m_data.DayTime_Avg_Qair + s_data.DayTime_Avg_Qair, color='darkorange', alpha=0.2)
-        ax3.fill_between(times, m_data.NightTime_Avg_Qair - s_data.NightTime_Avg_Qair, m_data.NightTime_Avg_Qair + s_data.NightTime_Avg_Qair, color='purple', alpha=0.2)
+        # UPDATED: alpha=0.5
+        ax3.fill_between(day_times, m_data.DayTime_Avg_Qair - s_data.DayTime_Avg_Qair, m_data.DayTime_Avg_Qair + s_data.DayTime_Avg_Qair, color='darkorange', alpha=0.5)
+        ax3.fill_between(times, m_data.NightTime_Avg_Qair - s_data.NightTime_Avg_Qair, m_data.NightTime_Avg_Qair + s_data.NightTime_Avg_Qair, color='purple', alpha=0.5)
         
     ax3.set_ylabel('Qair (kg/kg)', fontsize=9)
     ax3.set_ylim(0.005, 0.02) 
@@ -286,7 +286,7 @@ def plot_failure_event_with_baselines(axes, ds_path, thresh_path, target_date_st
     ax3.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'))
     ds.close(); ds_thresh.close()
 
-def plot_hourly_failure_event(axes, hourly_path, thresh_path, target_date_str, df, dc_id=None, is_summary=False, dc_list=None):
+    def plot_hourly_failure_event(axes, hourly_path, thresh_path, target_date_str, df, dc_id=None, is_summary=False, dc_list=None):
     ax1, ax2, ax3 = axes
     target_date = pd.to_datetime(target_date_str)
     start_date = target_date - pd.Timedelta(days=14)
@@ -309,15 +309,20 @@ def plot_hourly_failure_event(axes, hourly_path, thresh_path, target_date_str, d
         monthly_thresh = ds_thresh.sel(lat=dc_lat, lon=dc_lon, quantile=0.90, method='nearest').sel(time=month_str).mean(dim='time')
 
     lc = 'teal'
+    
+    # 1. Hourly Temp
     ax1.plot(times, m_data.Tair_C, color=lc, linewidth=1.5)
-    if is_summary: ax1.fill_between(times, m_data.Tair_C - s_data.Tair_C, m_data.Tair_C + s_data.Tair_C, color=lc, alpha=0.2)
+    # UPDATED: alpha=0.5
+    if is_summary: ax1.fill_between(times, m_data.Tair_C - s_data.Tair_C, m_data.Tair_C + s_data.Tair_C, color=lc, alpha=0.5)
     ax1.set_ylabel('Temp (°C)', fontsize=9)
     ax1.set_title('Hourly Fluctuations (14 Days Prior)' if not is_summary else 'Statewide Hourly Build-up (Mean ± 1 SD)', fontsize=12, fontweight='bold')
     ax1.set_ylim(10, 50); ax1.grid(True, alpha=0.3)
 
+    # 2. Hourly Enthalpy
     ax2.plot(times, m_data.enthalpy, color=lc, linewidth=1.5)
     if is_summary:
-        ax2.fill_between(times, m_data.enthalpy - s_data.enthalpy, m_data.enthalpy + s_data.enthalpy, color=lc, alpha=0.2)
+        # UPDATED: alpha=0.5
+        ax2.fill_between(times, m_data.enthalpy - s_data.enthalpy, m_data.enthalpy + s_data.enthalpy, color=lc, alpha=0.5)
         monthly_t_all = ds_thresh.sel(lat=lats, lon=lons, method='nearest').sel(time=month_str).mean(dim='time')
         d_c, n_c = {0.90: 'darkorange', 0.95: 'orangered', 0.99: 'red'}, {0.90: 'mediumpurple', 0.95: 'blueviolet', 0.99: 'indigo'}
         for q in [0.90, 0.95, 0.99]:
@@ -325,9 +330,9 @@ def plot_hourly_failure_event(axes, hourly_path, thresh_path, target_date_str, d
                 q_d = monthly_t_all.sel(quantile=q)
                 d_m, d_s = q_d.DayTime_Avg_enthalpy_thresholds.mean(dim='points').values, q_d.DayTime_Avg_enthalpy_thresholds.std(dim='points').values
                 n_m, n_s = q_d.NightTime_Avg_enthalpy_thresholds.mean(dim='points').values, q_d.NightTime_Avg_enthalpy_thresholds.std(dim='points').values
-                ax2.axhspan(d_m - d_s, d_m + d_s, color=d_c[q], alpha=0.1)
+                ax2.axhspan(d_m - d_s, d_m + d_s, color=d_c[q], alpha=0.15)
                 ax2.axhline(d_m, color=d_c[q], linestyle='-.', alpha=0.7)
-                ax2.axhspan(n_m - n_s, n_m + n_s, color=n_c[q], alpha=0.1)
+                ax2.axhspan(n_m - n_s, n_m + n_s, color=n_c[q], alpha=0.15)
                 ax2.axhline(n_m, color=n_c[q], linestyle='-.', alpha=0.7)
             except: pass
         for ac in ASHRAE_CLASSES:
@@ -339,13 +344,16 @@ def plot_hourly_failure_event(axes, hourly_path, thresh_path, target_date_str, d
         
     ax2.set_ylabel('Enthalpy', fontsize=9); ax2.set_ylim(20, 95); ax2.grid(True, alpha=0.3)
 
+    # 3. Hourly Humidity
     ax3.plot(times, m_data.Qair, color=lc, linewidth=1.5)
-    if is_summary: ax3.fill_between(times, m_data.Qair - s_data.Qair, m_data.Qair + s_data.Qair, color=lc, alpha=0.2)
+    # UPDATED: alpha=0.5
+    if is_summary: ax3.fill_between(times, m_data.Qair - s_data.Qair, m_data.Qair + s_data.Qair, color=lc, alpha=0.5)
     ax3.set_ylabel('Qair', fontsize=9); ax3.set_ylim(0.005, 0.02); ax3.grid(True, alpha=0.3)
 
     for ax in axes: ax.axvspan(target_date, target_date + pd.Timedelta(days=1), color='red', alpha=0.15)
     ax3.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'))
     ds_hourly.close(); ds_thresh.close()
+    
 
 def plot_rh_seasonal_envelope(axes, nc_path, target_date_str, df, dc_id=None, is_summary=False, dc_list=None):
     ax1, ax2 = axes
@@ -437,7 +445,7 @@ def draw_table(ax_table, stats, title):
         if i == 0: cell.set_text_props(weight='bold', color='white'); cell.set_facecolor('#4c4c4c')
         else: cell.set_facecolor('#f2f2f2' if i % 2 == 0 else 'white')
 
-        
+
 def get_file_paths(state_abb):
     if state_abb == 'VA':
         return ('/discover/nobackup/cmbreen/datacenters/virginia_hourly/va_Daily_DayNight_Summary_CORRECTED.nc',
