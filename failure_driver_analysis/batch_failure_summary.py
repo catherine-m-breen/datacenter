@@ -286,7 +286,7 @@ def plot_failure_event_with_baselines(axes, ds_path, thresh_path, target_date_st
     ax3.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'))
     ds.close(); ds_thresh.close()
 
-    def plot_hourly_failure_event(axes, hourly_path, thresh_path, target_date_str, df, dc_id=None, is_summary=False, dc_list=None):
+def plot_hourly_failure_event(axes, hourly_path, thresh_path, target_date_str, df, dc_id=None, is_summary=False, dc_list=None):
     ax1, ax2, ax3 = axes
     target_date = pd.to_datetime(target_date_str)
     start_date = target_date - pd.Timedelta(days=14)
@@ -353,7 +353,7 @@ def plot_failure_event_with_baselines(axes, ds_path, thresh_path, target_date_st
     for ax in axes: ax.axvspan(target_date, target_date + pd.Timedelta(days=1), color='red', alpha=0.15)
     ax3.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'))
     ds_hourly.close(); ds_thresh.close()
-    
+            
 
 def plot_rh_seasonal_envelope(axes, nc_path, target_date_str, df, dc_id=None, is_summary=False, dc_list=None):
     ax1, ax2 = axes
