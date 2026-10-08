@@ -244,28 +244,37 @@ def plot_failure_event_with_baselines(axes, ds_path, thresh_path, target_date_st
         
         monthly_t_all = ds_thresh.sel(lat=lats, lon=lons, method='nearest').sel(time=month_str).mean(dim='time')
         d_c, n_c = {0.90: 'darkorange', 0.95: 'orangered', 0.99: 'red'}, {0.90: 'mediumpurple', 0.95: 'blueviolet', 0.99: 'indigo'}
+        
         for q in [0.90, 0.95, 0.99]:
             try:
                 q_d = monthly_t_all.sel(quantile=q)
                 d_m, d_s = q_d.DayTime_Avg_enthalpy_thresholds.mean(dim='points').values, q_d.DayTime_Avg_enthalpy_thresholds.std(dim='points').values
                 n_m, n_s = q_d.NightTime_Avg_enthalpy_thresholds.mean(dim='points').values, q_d.NightTime_Avg_enthalpy_thresholds.std(dim='points').values
-                ax2.axhline(d_m, color=d_c[q], linestyle='-.', alpha=0.7)
+                
+                # Added labels for 90th, 95th, and 99th percentiles
+                ax2.axhline(d_m, color=d_c[q], linestyle='-.', alpha=0.7, label=f'{int(q*100)}th Pct (Day)')
                 ax2.axhspan(d_m - d_s, d_m + d_s, color=d_c[q], alpha=0.15)
-                ax2.axhline(n_m, color=n_c[q], linestyle='-.', alpha=0.7)
+                ax2.axhline(n_m, color=n_c[q], linestyle='-.', alpha=0.7, label=f'{int(q*100)}th Pct (Night)')
                 ax2.axhspan(n_m - n_s, n_m + n_s, color=n_c[q], alpha=0.15)
             except: pass
-        
-        for ac in ASHRAE_CLASSES:
-            h_max = get_max_enthalpy(ac['t'][1], ac['dp'][1])
-            ax2.axhline(h_max, color=ac['color'], linestyle=':', linewidth=1.5)
-            ax2.text(times[1], h_max + 0.5, f"A{ac['name'][1]} Max", color=ac['color'], fontsize=6, fontweight='bold')
+            
     else:
         ax2.axhline(monthly_thresh.DayTime_Avg_enthalpy_thresholds.values, color='firebrick', linestyle='-.', linewidth=1.5, label='90th Pct (Day)')
         ax2.axhline(monthly_thresh.NightTime_Avg_enthalpy_thresholds.values, color='indigo', linestyle='-.', linewidth=1.5, label='90th Pct (Night)')
         
+    # Moved ASHRAE out of the 'if' block so it plots for everyone, and added labels
+    for ac in ASHRAE_CLASSES:
+        h_max = get_max_enthalpy(ac['t'][1], ac['dp'][1])
+        ax2.axhline(h_max, color=ac['color'], linestyle=':', linewidth=1.5, label=f"ASHRAE {ac['name']} Max")
+        # Removed the ax2.text() line because the legend handles it now!
+        
     ax2.set_ylabel('Enthalpy (kJ/kg)', fontsize=9)
-    ax2.legend(loc='upper left', ncol=2, fontsize=7)
-    ax2.set_ylim(20, 95); ax2.grid(True, alpha=0.3)
+    
+    # Increased to 4 columns and dropped font size to 6 so it fits cleanly
+    ax2.legend(loc='upper left', ncol=4, fontsize=6)
+    
+    ax2.set_ylim(20, 95)
+    ax2.grid(True, alpha=0.3)
 
     # 3. Humidity
     ax3.plot(day_times, m_data.DayTime_Avg_Qair, color='darkorange', linewidth=2)
@@ -434,7 +443,7 @@ def draw_table(ax_table, stats, title):
     
     col_labels = [
         'Period', 'Threshold \n (kJ/kg)', 'Events \n (Crossings)', 'Total Hours \n Exceeded', 
-        'Avg Hours / \n Event', 'Max Sustained \n Hours (Peak)', 'Day Before \n Range (Max-Min)', 'Day Of \n Range (Max-Min)'
+        'Avg Hours / \n Event', 'Max Sustained \n Hours (Peak)', 'Day Before \n Range \n (Max-Min)', 'Day Of \n Range \n  (Max-Min)'
     ]
 
     ax_table.set_title(title, fontsize=10, fontweight='bold', pad=5)
