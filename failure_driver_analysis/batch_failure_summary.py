@@ -423,22 +423,54 @@ def plot_rh_seasonal_envelope(axes, nc_path, target_date_str, df, dc_id=None, is
 # ==========================================
 # 3. PDF GENERATION LOGIC 
 # ==========================================
-def draw_table(ax_table, stats, title):
-    d_val = f"{stats['day_val']:.1f}" if np.isfinite(stats['day_val']) else "N/A"
-    n_val = f"{stats['night_val']:.1f}" if np.isfinite(stats['night_val']) else "N/A"
-    
-    d_avg = f"{stats['day_hours'] / stats['day_cross']:.1f}" if stats['day_cross'] > 0 else "0.0"
-    n_avg = f"{stats['night_hours'] / stats['night_cross']:.1f}" if stats['night_cross'] > 0 else "0.0"
-    
-    d_sust = f"{stats['day_max_sustained']:.1f}"
-    n_sust = f"{stats['night_max_sustained']:.1f}"
-    
-    s_before = f"+{stats['surge_day_before']:.1f}"
-    s_of = f"+{stats['surge_day_of']:.1f}"
-    
+def draw_table(ax_table, stats_input, title, is_summary=False):
+    if is_summary:
+        # For the summary, 'stats_input' is a list of all datacenters' stats
+        def get_ms(key, prefix=""):
+            vals = [s[key] for s in stats_input if np.isfinite(s[key])]
+            return f"{prefix}{np.nanmean(vals):.1f} ± {np.nanstd(vals):.1f}" if vals else "N/A"
+        
+        def get_der_ms(num_key, den_key):
+            vals = [s[num_key]/s[den_key] for s in stats_input if s[den_key] > 0]
+            return f"{np.nanmean(vals):.1f} ± {np.nanstd(vals):.1f}" if vals else "0.0 ± 0.0"
+
+        d_val = get_ms('day_val')
+        n_val = get_ms('night_val')
+        d_cross = get_ms('day_cross')
+        d_hours = get_ms('day_hours')
+        d_avg = get_der_ms('day_hours', 'day_cross')
+        d_sust = get_ms('day_max_sustained')
+        
+        n_cross = get_ms('night_cross')
+        n_hours = get_ms('night_hours')
+        n_avg = get_der_ms('night_hours', 'night_cross')
+        n_sust = get_ms('night_max_sustained')
+        
+        s_before = get_ms('surge_day_before', prefix="+")
+        s_of = get_ms('surge_day_of', prefix="+")
+        
+    else:
+        # For individual datacenters, 'stats_input' is a single dictionary
+        stats = stats_input
+        d_val = f"{stats['day_val']:.1f}" if np.isfinite(stats['day_val']) else "N/A"
+        n_val = f"{stats['night_val']:.1f}" if np.isfinite(stats['night_val']) else "N/A"
+        
+        d_cross = f"{stats['day_cross']:.0f}"
+        d_hours = f"{stats['day_hours']:.0f}"
+        d_avg = f"{stats['day_hours'] / stats['day_cross']:.1f}" if stats['day_cross'] > 0 else "0.0"
+        d_sust = f"{stats['day_max_sustained']:.1f}"
+        
+        n_cross = f"{stats['night_cross']:.0f}"
+        n_hours = f"{stats['night_hours']:.0f}"
+        n_avg = f"{stats['night_hours'] / stats['night_cross']:.1f}" if stats['night_cross'] > 0 else "0.0"
+        n_sust = f"{stats['night_max_sustained']:.1f}"
+        
+        s_before = f"+{stats['surge_day_before']:.1f}"
+        s_of = f"+{stats['surge_day_of']:.1f}"
+
     table_data = [
-        ['Daytime', d_val, f"{stats['day_cross']:.0f}", f"{stats['day_hours']:.0f}", d_avg, d_sust, s_before, s_of],
-        ['Nighttime', n_val, f"{stats['night_cross']:.0f}", f"{stats['night_hours']:.0f}", n_avg, n_sust, s_before, s_of]
+        ['Daytime', d_val, d_cross, d_hours, d_avg, d_sust, s_before, s_of],
+        ['Nighttime', n_val, n_cross, n_hours, n_avg, n_sust, s_before, s_of]
     ]
     
     col_labels = [
@@ -448,11 +480,16 @@ def draw_table(ax_table, stats, title):
 
     ax_table.set_title(title, fontsize=10, fontweight='bold', pad=5)
     table = ax_table.table(cellText=table_data, colLabels=col_labels, loc='center', cellLoc='center', bbox=[0, 0, 1, 1])
-    table.auto_set_font_size(False); table.set_fontsize(6); table.scale(1, 1.5) 
+    table.auto_set_font_size(False); table.set_fontsize(6)
     
     for (i, j), cell in table.get_celld().items():
-        if i == 0: cell.set_text_props(weight='bold', color='white'); cell.set_facecolor('#4c4c4c')
-        else: cell.set_facecolor('#f2f2f2' if i % 2 == 0 else 'white')
+        if i == 0: 
+            cell.set_text_props(weight='bold', color='white')
+            cell.set_facecolor('#4c4c4c')
+            cell.set_height(0.45) # 45% height for the 3-line header
+        else: 
+            cell.set_facecolor('#f2f2f2' if i % 2 == 0 else 'white')
+            cell.set_height(0.275) # 27.5% height for the data rows
 
 
 def get_file_paths(state_abb):
@@ -482,14 +519,21 @@ def generate_master_panel(pdf, target_date, df, state_abb, dc_id=None, is_summar
     plot_datacenter_heat_map_tx(ax_map, target_date, df, daily_nc, dc_id=dc_id, is_summary=is_summary, dc_list=dc_list)
 
     if is_summary:
-        avg_stats = {k: np.nanmean([s[k] for s in all_stats]) for k in all_stats[0].keys()}
-        max_surge = avg_stats.get('max_hourly_jump', 0.0)
-        draw_table(ax_table, avg_stats, f"Statewide Average - 14-Day Pre-Event Summary (Avg Max Surge: +{max_surge:.1f} kJ/kg)")
+        # Calculate mean and standard deviation for the title's surge text
+        surge_vals = [s['max_hourly_jump'] for s in all_stats if 'max_hourly_jump' in s]
+        max_surge_m = np.nanmean(surge_vals) if surge_vals else 0.0
+        max_surge_s = np.nanstd(surge_vals) if surge_vals else 0.0
+        
+        # Pass the entire list of stats (all_stats) and set is_summary=True
+        title_str = f"Statewide Average - 14-Day Pre-Event Summary (Avg Max Surge: +{max_surge_m:.1f} ± {max_surge_s:.1f} kJ/kg)"
+        draw_table(ax_table, all_stats, title_str, is_summary=True)
     else:
         dc_lat, dc_lon = df[df['id'] == dc_id]['lat'].values[0], df[df['id'] == dc_id]['lon'].values[0]
         stats = compute_threshold_stats(daily_nc, hourly_nc, thresh_nc, target_date, dc_lat, dc_lon)
         max_surge = stats.get('max_hourly_jump', 0.0)
-        draw_table(ax_table, stats, f"14-Day Pre-Event Summary (Max Hourly Surge: +{max_surge:.1f} kJ/kg)")
+        
+        # Pass the single dict and set is_summary=False
+        draw_table(ax_table, stats, f"14-Day Pre-Event Summary (Max Hourly Surge: +{max_surge:.1f} kJ/kg)", is_summary=False)
 
     # 2. Top Right (Daily)
     gs_daily = gs[0, 1].subgridspec(3, 1, hspace=0.1)
