@@ -8,8 +8,6 @@ import xarray as xr
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_pdf import PdfPages
-from matplotlib.gridspec import GridSpec
 
 warnings.filterwarnings('ignore')
 
@@ -81,121 +79,88 @@ def extract_state_data(nc_path, df, state_abb, is_aws_only=False):
 
     with xr.open_dataset(nc_path) as ds:
         ds_dc = ds.sel(lat=lats, lon=lons, method='nearest')
-        # Defensively drop any duplicate time indices before interpolating
         ds_dc = ds_dc.drop_duplicates(dim='time')
-        # Interpolate and load into memory
         ds_dc = ds_dc.interpolate_na(dim='time', method='linear').load()
         
     return ds_dc
 
+def get_summer_daytime(ds):
+    """Helper to extract JJA Daytime arrays."""
+    ds_summer = ds.where(ds['time'].dt.season == 'JJA', drop=True)
+    t_raw = ds_summer['DayTime_Avg_Tair'].values.flatten()
+    q_raw = ds_summer['DayTime_Avg_Qair'].values.flatten()
+    p_raw = ds_summer['DayTime_Avg_PSurf'].values.flatten()
+    
+    valid = np.isfinite(t_raw) & np.isfinite(q_raw) & np.isfinite(p_raw)
+    t, q, p_s = t_raw[valid], q_raw[valid], p_raw[valid]
+    rh = get_rh(t, q, p_s)
+    
+    return t, q, p_s, rh
+
 # ==========================================
 # 3. PLOTTING ENGINE
 # ==========================================
-def create_state_page(pdf, ds_dc, state_name):
-    print(f"Generating PDF page for {state_name}...")
-    fig = plt.figure(figsize=(24, 16), dpi=150)
+def create_comparison_plot(ds_tx, ds_va, out_filepath):
+    print("Generating comparison plot for Texas vs Virginia (Daytime Summer)...")
     
-    # Leave slightly more space on the right (wspace) for the colorbar
-    gs = GridSpec(3, 4, figure=fig, height_ratios=[1, 1, 0.4], hspace=0.3, wspace=0.15)
-    
-    fig.suptitle(f"{state_name} Datacenters: Seasonal Psychrometric Analysis", fontsize=24, fontweight='bold', y=0.95)
+    fig, axes = plt.subplots(1, 2, figsize=(20, 8), dpi=150)
+    fig.suptitle("Datacenters: Daytime Summer (JJA) Psychrometric Comparison", 
+                 fontsize=22, fontweight='bold', y=0.98)
 
-    seasons = ['DJF', 'MAM', 'JJA', 'SON']
-    season_names = ['Winter (DJF)', 'Spring (MAM)', 'Summer (JJA)', 'Fall (SON)']
-    periods = [('Daytime', 'DayTime_Avg'), ('Nighttime', 'NightTime_Avg')]
-    
-    # Step 3a: Pre-calculate the data and find the MAXIMUM frequency across ALL panels.
-    # This ensures our single colorbar perfectly maps across every season uniformly.
-    panel_data = {}
-    global_vmax = 1
-    
-    for row_idx, (p_name, p_prefix) in enumerate(periods):
-        for col_idx, season in enumerate(seasons):
-            ds_season = ds_dc.where(ds_dc['time'].dt.season == season, drop=True)
-            t_raw = ds_season[f'{p_prefix}_Tair'].values.flatten()
-            q_raw = ds_season[f'{p_prefix}_Qair'].values.flatten()
-            p_raw = ds_season[f'{p_prefix}_PSurf'].values.flatten()
-            
-            valid = np.isfinite(t_raw) & np.isfinite(q_raw) & np.isfinite(p_raw)
-            t, q, p_s = t_raw[valid], q_raw[valid], p_raw[valid]
-            rh = get_rh(t, q, p_s)
-            
-            panel_data[(row_idx, col_idx)] = (t, q, p_s, rh)
-            
-            # Find the max density block for this panel
-            counts, _, _ = np.histogram2d(t, rh, bins=[80, 80], range=[[-15, 50], [0, 100]])
-            if counts.max() > global_vmax:
-                global_vmax = counts.max()
+    states_data = [
+        ("Texas", ds_tx, axes[0]),
+        ("Virginia", ds_va, axes[1])
+    ]
 
-    # Step 3b: Plot the heatmaps and ASHRAE envelopes
-    table_data = []
-    heatmap_axes = []
-    
-    for row_idx, (p_name, p_prefix) in enumerate(periods):
-        for col_idx, season in enumerate(seasons):
-            ax = fig.add_subplot(gs[row_idx, col_idx])
-            heatmap_axes.append(ax)
+    for state_name, ds, ax in states_data:
+        t, q, p_s, rh = get_summer_daytime(ds)
+        
+        # Plot Heatmap - using individual scale per state
+        counts, xedges, yedges, im = ax.hist2d(
+            t, rh, bins=[80, 80], range=[[-15, 50], [0, 100]], 
+            cmap='inferno', cmin=1, alpha=0.9
+        )
+        
+        # Draw all 4 ASHRAE Envelopes stacked
+        for ac in ASHRAE_CLASSES:
+            t_grid, b_bnd, t_bnd = get_ashrae_bounds(*ac['t'], *ac['rh'], *ac['dp'])
+            ax.fill_between(t_grid, b_bnd, t_bnd, color=ac['color'], alpha=ac['alpha'], zorder=2)
             
-            t, q, p_s, rh = panel_data[(row_idx, col_idx)]
-            
-            # Plot Heatmap USING our calculated global_vmax so all scales match
-            counts, xedges, yedges, im = ax.hist2d(
-                t, rh, bins=[80, 80], range=[[-15, 50], [0, 100]], 
-                cmap='inferno', cmin=1, vmax=global_vmax, alpha=0.9
-            )
-            
-            # Draw all 4 ASHRAE Envelopes stacked
-            for ac in ASHRAE_CLASSES:
-                t_grid, b_bnd, t_bnd = get_ashrae_bounds(*ac['t'], *ac['rh'], *ac['dp'])
-                ax.fill_between(t_grid, b_bnd, t_bnd, color=ac['color'], alpha=ac['alpha'], zorder=2)
-                
-                # Solid lines with vertical caps
-                ax.plot(t_grid, t_bnd, color=ac['color'], linewidth=1.5, zorder=3)
-                ax.plot(t_grid, b_bnd, color=ac['color'], linewidth=1.5, zorder=3)
-                ax.plot([t_grid[0], t_grid[0]], [b_bnd[0], t_bnd[0]], color=ac['color'], linewidth=1.5, zorder=3)
-                ax.plot([t_grid[-1], t_grid[-1]], [b_bnd[-1], t_bnd[-1]], color=ac['color'], linewidth=1.5, zorder=3)
-            
-            # Labels and Limits
-            ax.set_title(f"{p_name} | {season_names[col_idx]}", fontsize=14, fontweight='bold')
-            ax.set_xlim(-15, 50)
-            ax.set_ylim(0, 100)
-            ax.grid(alpha=0.3, linestyle='--')
-            
-            if row_idx == 1: ax.set_xlabel('Temperature (°C)', fontsize=12)
-            if col_idx == 0: ax.set_ylabel('Relative Humidity (%)', fontsize=12)
+            # Solid lines with vertical caps
+            ax.plot(t_grid, t_bnd, color=ac['color'], linewidth=1.5, zorder=3)
+            ax.plot(t_grid, b_bnd, color=ac['color'], linewidth=1.5, zorder=3)
+            ax.plot([t_grid[0], t_grid[0]], [b_bnd[0], t_bnd[0]], color=ac['color'], linewidth=1.5, zorder=3)
+            ax.plot([t_grid[-1], t_grid[-1]], [b_bnd[-1], t_bnd[-1]], color=ac['color'], linewidth=1.5, zorder=3)
+        
+        # Add a colorbar specific to this subplot
+        cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        cbar.set_label('Frequency of Occurrence', fontsize=12, fontweight='bold')
+        
+        # Formatting
+        ax.set_title(f"{state_name}", fontsize=18, fontweight='bold')
+        ax.set_xlim(-15, 50)
+        ax.set_ylim(0, 100)
+        ax.grid(alpha=0.3, linestyle='--')
+        ax.set_xlabel('Temperature (°C)', fontsize=14)
+        ax.set_ylabel('Relative Humidity (%)', fontsize=14)
 
-            # Calculate Probabilities for the Table
-            probs = []
-            for ac in ASHRAE_CLASSES[::-1]: # A1, A2, A3, A4
-                out_bool = check_outside(t, q, p_s, ac)
-                pct = (np.sum(out_bool) / len(t)) * 100 if len(t) > 0 else 0
-                probs.append(f"{pct:.2f}%")
-                
-            table_data.append([p_name, season_names[col_idx]] + probs)
+        # Calculate Probabilities for Top Right Box
+        stats_text = "Outside Distribution:\n"
+        for ac in ASHRAE_CLASSES[::-1]: # Calculate from A1 down to A4
+            out_bool = check_outside(t, q, p_s, ac)
+            pct = (np.sum(out_bool) / len(t)) * 100 if len(t) > 0 else 0
+            stats_text += f"{ac['name']}: {pct:.2f}%\n"
+            
+        # Add textbox in top right
+        props = dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.85, edgecolor='gray')
+        ax.text(0.96, 0.96, stats_text.strip(), transform=ax.transAxes, fontsize=12,
+                verticalalignment='top', horizontalalignment='right', bbox=props, zorder=5, family='monospace')
 
-    # Add shared Colorbar spanning the height of the heatmaps
-    cbar = fig.colorbar(im, ax=heatmap_axes, shrink=0.8, aspect=30, pad=0.02)
-    cbar.set_label('Frequency of Occurrence', fontsize=14, fontweight='bold')
-    cbar.ax.tick_params(labelsize=12)
-
-    # Step 3c: Generate Probability Table
-    ax_table = fig.add_subplot(gs[2, :])
-    ax_table.axis('off')
+    plt.tight_layout()
+    # Adjust top to accommodate main suptitle
+    plt.subplots_adjust(top=0.88)
     
-    col_labels = ['Period', 'Season', 'Outside A1', 'Outside A2', 'Outside A3', 'Outside A4']
-    table = ax_table.table(cellText=table_data, colLabels=col_labels, loc='center', cellLoc='center', bbox=[0.1, 0, 0.8, 1])
-    
-    table.auto_set_font_size(False)
-    table.set_fontsize(12)
-    
-    for (i, j), cell in table.get_celld().items():
-        if i == 0:
-            cell.set_text_props(weight='bold', color='white')
-            cell.set_facecolor('#4c4c4c')
-        else:
-            cell.set_facecolor('#f2f2f2' if i % 2 == 0 else 'white')
-
-    pdf.savefig(fig, bbox_inches='tight')
+    fig.savefig(out_filepath, bbox_inches='tight')
     plt.close(fig)
 
 # ==========================================
@@ -208,7 +173,7 @@ if __name__ == "__main__":
     
     output_dir = '/discover/nobackup/cmbreen/datacenters/output_pdfs/'
     os.makedirs(output_dir, exist_ok=True)
-    out_pdf = os.path.join(output_dir, 'ASHRAE_Seasonal_Matrix.pdf')
+    out_img = os.path.join(output_dir, 'ASHRAE_DaytimeSummer_Comparison.pdf')
 
     print("Loading locations database...")
     df = pd.read_csv(csv_path)
@@ -217,11 +182,10 @@ if __name__ == "__main__":
     ds_va = extract_state_data(va_nc, df, 'VA', is_aws_only=False)
     ds_tx = extract_state_data(tx_nc, df, 'TX', is_aws_only=False)
 
-    with PdfPages(out_pdf) as pdf:
-        create_state_page(pdf, ds_va, "Virginia")
-        create_state_page(pdf, ds_tx, "Texas")
+    # Generate single page plot
+    create_comparison_plot(ds_tx, ds_va, out_img)
         
     ds_va.close()
     ds_tx.close()
     
-    print(f"Success! Matrix saved to: {out_pdf}")
+    print(f"Success! Plot saved to: {out_img}")
