@@ -85,7 +85,9 @@ for file_idx, stn_file in enumerate(station_files):
     df_stn.replace([-99.0, -99.000, -9999.0], np.nan, inplace=True)
     
     df_stn['datetime'] = pd.to_datetime(df_stn['datetime'], errors='coerce').dt.tz_localize(None)
-    df_stn['datetime'] = df_stn['datetime'].dt.round('H') 
+    
+    # FIX: Use lowercase 'h' for Pandas 2.2.0+
+    df_stn['datetime'] = df_stn['datetime'].dt.round('h') 
     
     stn_lat = df_stn['latitude'].iloc[0]
     stn_lon = df_stn['longitude'].iloc[0]
@@ -132,8 +134,8 @@ for file_idx, stn_file in enumerate(station_files):
     
     print(f"  -> [DEBUG] Extracted {len(df_nldas)} raw rows from NLDAS files.")
     
-    # ROUND TO NEAREST HOUR TO GUARANTEE MATCH
-    df_nldas['datetime'] = df_nldas['datetime'].dt.round('H')
+    # FIX: Use lowercase 'h' for Pandas 2.2.0+
+    df_nldas['datetime'] = df_nldas['datetime'].dt.round('h')
     
     if df_nldas[NLDAS_TMP].mean() > 200: 
         df_nldas['T_C'] = df_nldas[NLDAS_TMP] - 273.15
