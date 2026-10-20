@@ -21,6 +21,13 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 # Define the columns we want to inspect
 VARS_TO_CHECK = ['temperature', 'relative_humidity', 'precipitation']
 
+# Define units for plotting
+UNITS = {
+    'temperature': '°C',
+    'relative_humidity': '%',
+    'precipitation': 'mm'
+}
+
 # Define meteorological "extreme" thresholds to flag suspicious data
 THRESHOLDS = {
     'temperature': {'low': -40.0, 'high': 50.0},        # °C
@@ -85,6 +92,7 @@ for file_idx, stn_file in enumerate(station_files):
         for i, var in enumerate(VARS_TO_CHECK):
             if var in df.columns:
                 data = df[var]
+                unit_str = UNITS.get(var, '')
                 
                 # Calculate Missing Values
                 missing_count = data.isna().sum()
@@ -114,7 +122,7 @@ for file_idx, stn_file in enumerate(station_files):
                     ax_hist = axes[0, i]
                     ax_hist.hist(valid_data, bins=50, color='skyblue', edgecolor='black', alpha=0.7)
                     ax_hist.set_title(f"{var.capitalize()}\nMissing: {missing_pct:.1f}%", fontsize=14)
-                    ax_hist.set_xlabel("Value")
+                    ax_hist.set_xlabel(f"Value ({unit_str})")
                     ax_hist.set_ylabel("Frequency")
                     ax_hist.grid(axis='y', alpha=0.3)
                     
@@ -125,7 +133,7 @@ for file_idx, stn_file in enumerate(station_files):
                     ax_box = axes[1, i]
                     ax_box.boxplot(valid_data, vert=False, flierprops={'marker': 'o', 'markerfacecolor': 'red', 'markersize': 4, 'alpha': 0.5})
                     ax_box.set_title(f"{var.capitalize()} Spread\nMin: {v_min:.1f} | Max: {v_max:.1f}", fontsize=12)
-                    ax_box.set_xlabel("Value")
+                    ax_box.set_xlabel(f"Value ({unit_str})")
                     ax_box.set_yticks([])
                     ax_box.grid(axis='x', alpha=0.3)
                     

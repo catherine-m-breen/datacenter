@@ -3,3 +3,9 @@
 scp -r /Users/cmbreen/code/datacenter/sanity_check/uscrn_independent_data cmbreen@discover.nccs.nasa.gov:/discover/nobackup/cmbreen/datacenters/
 
 scp -r /Users/cmbreen/code/datacenter/sanity_check/raw_noaa_hourly cmbreen@discover.nccs.nasa.gov:/discover/nobackup/cmbreen/datacenters/
+
+
+scp -r cmbreen@discover.nccs.nasa.gov:/discover/nobackup/cmbreen/datacenters/datacenter/sanity_check/station_qaqc_reports ~/Desktop/
+
+scp -r cmbreen@discover.nccs.nasa.gov:/discover/nobackup/cmbreen/datacenters/datacenter//nldas_station_reports ~/Desktop/
+
