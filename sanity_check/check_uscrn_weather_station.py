@@ -42,7 +42,6 @@ else:
 
 print(f"Total stations queued for QA/QC processing: {len(station_files)}\n")
 
-# List to hold summary statistics for the final CSV
 summary_stats = []
 
 # ==========================================
@@ -61,11 +60,25 @@ for file_idx, stn_file in enumerate(station_files):
         'total_records': total_rows
     }
     
-    # Create an individual PDF for this specific station
+    # --- ISOLATE AND SAVE MISSING TIMESTAMPS ---
+    # Find columns that actually exist in the dataframe
+    available_vars = [v for v in VARS_TO_CHECK if v in df.columns]
+    
+    # Filter for any row where at least one of the variables is NaN
+    if available_vars:
+        missing_mask = df[available_vars].isna().any(axis=1)
+        df_missing = df[missing_mask]
+        
+        if not df_missing.empty:
+            missing_csv_path = os.path.join(OUTPUT_DIR, f"{stn_name}_missing_timestamps.csv")
+            # Save just the datetime and the variables to keep it clean
+            cols_to_save = ['datetime'] + available_vars
+            df_missing[cols_to_save].to_csv(missing_csv_path, index=False)
+    
+    # --- GENERATE PDF REPORT ---
     pdf_path = os.path.join(OUTPUT_DIR, f"{stn_name}_distributions.pdf")
     
     with PdfPages(pdf_path) as pdf:
-        # Set up the plot (2 rows: Histograms top, Boxplots bottom)
         fig, axes = plt.subplots(2, 3, figsize=(16, 10))
         fig.suptitle(f"Data Distribution & Outliers\nStation: {stn_name} | Total Records: {total_rows:,}", fontsize=18, fontweight='bold')
         
@@ -73,7 +86,7 @@ for file_idx, stn_file in enumerate(station_files):
             if var in df.columns:
                 data = df[var]
                 
-                # --- 1. Calculate Missing Values ---
+                # Calculate Missing Values
                 missing_count = data.isna().sum()
                 missing_pct = (missing_count / total_rows) * 100
                 valid_data = data.dropna()
@@ -82,7 +95,7 @@ for file_idx, stn_file in enumerate(station_files):
                 station_record[f'{var}_missing_pct'] = round(missing_pct, 2)
                 
                 if not valid_data.empty:
-                    # --- 2. Calculate Extremes & Stats ---
+                    # Calculate Extremes & Stats
                     v_min, v_max = valid_data.min(), valid_data.max()
                     v_mean, v_median = valid_data.mean(), valid_data.median()
                     
@@ -97,7 +110,7 @@ for file_idx, stn_file in enumerate(station_files):
                     station_record[f'{var}_extreme_lows'] = extreme_low_count
                     station_record[f'{var}_extreme_highs'] = extreme_high_count
                     
-                    # --- 3. Plotting Histograms (Top Row) ---
+                    # Plot Histograms (Top Row)
                     ax_hist = axes[0, i]
                     ax_hist.hist(valid_data, bins=50, color='skyblue', edgecolor='black', alpha=0.7)
                     ax_hist.set_title(f"{var.capitalize()}\nMissing: {missing_pct:.1f}%", fontsize=14)
@@ -108,7 +121,7 @@ for file_idx, stn_file in enumerate(station_files):
                     ax_hist.axvline(low_thresh, color='red', linestyle='--', alpha=0.6, label='Low Thresh')
                     ax_hist.axvline(high_thresh, color='red', linestyle='--', alpha=0.6, label='High Thresh')
                     
-                    # --- 4. Plotting Boxplots (Bottom Row) ---
+                    # Plot Boxplots (Bottom Row)
                     ax_box = axes[1, i]
                     ax_box.boxplot(valid_data, vert=False, flierprops={'marker': 'o', 'markerfacecolor': 'red', 'markersize': 4, 'alpha': 0.5})
                     ax_box.set_title(f"{var.capitalize()} Spread\nMin: {v_min:.1f} | Max: {v_max:.1f}", fontsize=12)
@@ -131,11 +144,10 @@ for file_idx, stn_file in enumerate(station_files):
             else:
                 print(f"  -> Warning: Column '{var}' not found in {stn_name}")
                 
-        plt.tight_layout(rect=[0, 0.03, 1, 0.90]) # Leave room for the main title
+        plt.tight_layout(rect=[0, 0.03, 1, 0.90]) 
         pdf.savefig(fig)
-        plt.close(fig) # Frees up memory after saving each station's plot
+        plt.close(fig) 
         
-    # Append record to summary list
     summary_stats.append(station_record)
 
 # ==========================================
@@ -146,5 +158,6 @@ csv_output_path = os.path.join(OUTPUT_DIR, 'ALL_STATIONS_qaqc_summary.csv')
 summary_df.to_csv(csv_output_path, index=False)
 
 print(f"\nDone! QA/QC Checks complete.")
-print(f"1. Individual PDFs saved in: {OUTPUT_DIR}/")
-print(f"2. Statistical Summary Table saved to: {csv_output_path}")
+print(f"1. Individual Station PDF Distributions saved in: {OUTPUT_DIR}/")
+print(f"2. Individual Station Missing Timestamps CSVs saved in: {OUTPUT_DIR}/")
+print(f"3. Master Statistical Summary Table saved to: {csv_output_path}")
