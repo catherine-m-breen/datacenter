@@ -113,7 +113,7 @@ with PdfPages(OUTPUT_PDF) as pdf:
 
         # 4. Plot USCRN Weather Stations (Purple Stars)
         # Using zorder=3 ensures the stations stand out on top of everything
-        ax.scatter(stn_lons, stn_lats, c='#9b59b6', s=90, marker='*', edgecolor='black', linewidth=0.5, zorder=3,
+        ax.scatter(stn_lons, stn_lats, c='#9b59b6', s=90, marker='o', edgecolor='black', linewidth=0.5, zorder=3,
                    label='USCRN Station' if region == 'CONUS' else "")
         
         # 5. Map Formatting
