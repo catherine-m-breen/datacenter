@@ -11,7 +11,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # ==========================================
-# CONFIGURATION TOGGLES (Set these for testing/production)
+# CONFIGURATION TOGGLES
 # ==========================================
 PROCESS_ALL_YEARS = False     # False = 2018 only, True = All available years
 PROCESS_ALL_STATIONS = False  # False = VA & TX only, True = All stations in directory
@@ -26,7 +26,6 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 NLDAS_TMP = 'TMP'      
 NLDAS_SPFH = 'SPFH'    
 
-# Optional Regional bounding boxes to draw for VA and TX tests
 REGIONS = {
     'VA': {'lat': (38.5, 39.5), 'lon': (-78.0, -77.0)},
     'TX': {'lat': (32.3, 33.3), 'lon': (-97.5, -96.5)}
@@ -61,13 +60,10 @@ def get_season(month):
 # ==========================================
 # MAIN PROCESSING LOOP
 # ==========================================
-# 1. Dynamically gather station files based on toggle
 if PROCESS_ALL_STATIONS:
-    # Grabs all CSVs but ignores the combined summary file
     station_files = [f for f in glob.glob(os.path.join(STATION_DIR, '*.csv')) 
                      if not os.path.basename(f).startswith('all_')]
 else:
-    # Grabs only VA and TX
     station_files = glob.glob(os.path.join(STATION_DIR, 'VA_*.csv')) + \
                     glob.glob(os.path.join(STATION_DIR, 'TX_*.csv'))
 
@@ -90,7 +86,7 @@ for file_idx, stn_file in enumerate(station_files):
     df_stn = calc_psychrometrics(df_stn, source='station')
     df_stn = df_stn.set_index('datetime')
     
-    # Load NLDAS Data efficiently
+    # Identify NLDAS Files
     if PROCESS_ALL_YEARS:
         nldas_pattern = os.path.join(NLDAS_DIR, '*', '*.nc')
     else:
@@ -101,19 +97,36 @@ for file_idx, stn_file in enumerate(station_files):
         print("No NLDAS files found for pattern. Skipping.")
         continue
 
-    print(f"Found {len(nldas_files)} NLDAS files. Extracting nearest point...")
+    # --- THE FIX: Safe Sequential Extraction for HPC Login Nodes ---
+    print(f"Found {len(nldas_files)} NLDAS files. Extracting point sequentially (HPC safe mode)...")
     
-    def select_nearest(ds):
-        lat_var = 'lat' if 'lat' in ds.coords else 'latitude'
-        lon_var = 'lon' if 'lon' in ds.coords else 'longitude'
-        return ds.sel({lat_var: stn_lat, lon_var: stn_lon}, method='nearest')
-    
-    # Parallel load with dask backend
-    ds_nldas = xr.open_mfdataset(nldas_files, preprocess=select_nearest, parallel=True, combine='nested', concat_dim='time')
-    df_nldas = ds_nldas.to_dataframe().reset_index()
-    
+    df_list = []
+    for f in nldas_files:
+        try:
+            # 'with' ensures the file handle is completely closed before opening the next
+            with xr.open_dataset(f, engine='netcdf4') as ds:
+                lat_var = 'lat' if 'lat' in ds.coords else 'latitude'
+                lon_var = 'lon' if 'lon' in ds.coords else 'longitude'
+                
+                # Extract the single point
+                pt = ds.sel({lat_var: stn_lat, lon_var: stn_lon}, method='nearest')
+                
+                # Convert to dataframe and only keep required columns to save memory
+                df_pt = pt[[NLDAS_TMP, NLDAS_SPFH]].to_dataframe().reset_index()
+                df_list.append(df_pt)
+        except Exception as e:
+            # If one file is corrupted, skip it instead of crashing the whole script
+            pass
+            
+    if not df_list:
+        print(f"Could not extract valid data for {stn_name}. Skipping.")
+        continue
+        
+    # Combine all individual hours into one dataframe
+    df_nldas = pd.concat(df_list, ignore_index=True)
     df_nldas = df_nldas.rename(columns={'time': 'datetime'})
-    
+    # --------------------------------------------------------------
+
     # Handle Kelvin to Celsius if necessary
     if df_nldas[NLDAS_TMP].mean() > 200: 
         df_nldas['T_C'] = df_nldas[NLDAS_TMP] - 273.15
@@ -123,7 +136,6 @@ for file_idx, stn_file in enumerate(station_files):
     df_nldas['Q_kg_kg'] = df_nldas[NLDAS_SPFH]
     df_nldas = calc_psychrometrics(df_nldas, source='nldas')
     df_nldas = df_nldas.set_index('datetime')
-    ds_nldas.close()
     
     # Merge
     print("Aligning time series...")
@@ -142,18 +154,15 @@ for file_idx, stn_file in enumerate(station_files):
         # --- PAGE 1: MAP ---
         fig, ax = plt.subplots(figsize=(8, 6))
         
-        # Define dynamic map bounds based on station location (± 2 degrees)
         lat_min, lat_max = stn_lat - 2, stn_lat + 2
         lon_min, lon_max = stn_lon - 2, stn_lon + 2
         
-        # Draw the target grid box only if the state is in our dictionary
         if state in REGIONS:
             bounds = REGIONS[state]
             rect = plt.Rectangle((bounds['lon'][0], bounds['lat'][0]), 
                                  bounds['lon'][1]-bounds['lon'][0], bounds['lat'][1]-bounds['lat'][0],
                                  fill=False, color='blue', lw=2, label=f'{state} Target Grid Box')
             ax.add_patch(rect)
-            # Override bounds to ensure box is visible
             lat_min, lat_max = bounds['lat'][0]-2, bounds['lat'][1]+2
             lon_min, lon_max = bounds['lon'][0]-2, bounds['lon'][1]+2
             
@@ -167,7 +176,6 @@ for file_idx, stn_file in enumerate(station_files):
         pdf.savefig(fig); plt.close()
         
         # --- PAGE 2: TIMESERIES ---
-        # If running just 2018, show 2018. If all years, still show 2018 as the sample year
         merged_sample = merged[merged.index.year == 2018]
         if not merged_sample.empty:
             fig, axes = plt.subplots(3, 1, figsize=(12, 10), sharex=True)
