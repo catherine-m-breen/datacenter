@@ -9,3 +9,5 @@ scp -r cmbreen@discover.nccs.nasa.gov:/discover/nobackup/cmbreen/datacenters/dat
 
 scp -r cmbreen@discover.nccs.nasa.gov:/discover/nobackup/cmbreen/datacenters/datacenter//nldas_station_reports ~/Desktop/
 
+scp -r cmbreen@discover.nccs.nasa.gov:/discover/nobackup/cmbreen/datacenters/datacenter/sanity_check/nldas_station_reports/VA_Cape_Charles_5_ENE_USCRN_hourly_analysis.pdf ~/Desktop/
+
