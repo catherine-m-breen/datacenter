@@ -11,19 +11,25 @@ warnings.filterwarnings('ignore')
 # ==========================================
 # CONFIGURATION
 # ==========================================
+PROCESS_ALL_STATIONS = False  # Set to False to only plot VA & TX stations
+
 STATION_DIR = '/discover/nobackup/cmbreen/datacenters/uscrn_independent_data'
 QAQC_DIR = './station_qaqc_reports'
 OUTPUT_PDF = 'missing_data_timeline.pdf'
 
-# Grab all original station files (ignoring the 'all_...' combined file)
-station_files = sorted([f for f in glob.glob(os.path.join(STATION_DIR, '*.csv')) 
-                        if not os.path.basename(f).startswith('all_')])
+# Dynamically gather station files based on toggle
+if PROCESS_ALL_STATIONS:
+    station_files = sorted([f for f in glob.glob(os.path.join(STATION_DIR, '*.csv')) 
+                            if not os.path.basename(f).startswith('all_')])
+else:
+    station_files = sorted(glob.glob(os.path.join(STATION_DIR, 'VA_*.csv')) + \
+                           glob.glob(os.path.join(STATION_DIR, 'TX_*.csv')))
 
-print(f"Found {len(station_files)} total stations.")
-print("Generating timeline plot... (This may take a minute to scan all files)")
+print(f"Found {len(station_files)} total stations to plot.")
+print(f"Generating timeline plot: {OUTPUT_PDF}")
 
-# Dynamically size the figure height based on the number of stations so they don't squish
-fig_height = max(8, len(station_files) * 0.35)
+# Dynamically size the figure height based on the number of stations
+fig_height = max(6, len(station_files) * 0.4)
 fig, ax = plt.subplots(figsize=(16, fig_height))
 
 station_names = []
@@ -34,7 +40,7 @@ for idx, stn_file in enumerate(station_files):
     station_names.append(stn_name)
     y_ticks.append(idx)
     
-    # 1. Get the operational lifespan from the original file (fast read of just the datetime column)
+    # 1. Get the operational lifespan from the original file
     df_orig = pd.read_csv(stn_file, usecols=['datetime'])
     df_orig['datetime'] = pd.to_datetime(df_orig['datetime'], errors='coerce', utc=True).dt.tz_localize(None)
     start_date = df_orig['datetime'].min()
@@ -54,16 +60,14 @@ for idx, stn_file in enumerate(station_files):
             # Plot the missing points as bright red vertical ticks
             ax.plot(df_miss['datetime'], [idx] * len(df_miss), 
                     marker='|', color='red', markersize=12, linestyle='None', zorder=2)
+    else:
+        print(f" -> [WARNING] No QAQC file found for {stn_name}. Missing data will not be plotted.")
             
-    # Print progress for every 10th station so you know it's working
-    if (idx + 1) % 10 == 0:
-        print(f" -> Processed {idx + 1} / {len(station_files)}")
-
 # ==========================================
 # AESTHETICS & FORMATTING
 # ==========================================
 ax.set_yticks(y_ticks)
-ax.set_yticklabels(station_names, fontsize=9)
+ax.set_yticklabels(station_names, fontsize=10)
 
 # Force the X-axis bounds from 2002 to 2026
 ax.set_xlim(pd.Timestamp('2002-01-01'), pd.Timestamp('2026-12-31'))
@@ -86,10 +90,9 @@ ax.grid(axis='x', linestyle='--', alpha=0.6)
 ax.set_axisbelow(True)
 
 # Save to PDF
-print(f"\nSaving to {OUTPUT_PDF}...")
 plt.tight_layout()
 with PdfPages(OUTPUT_PDF) as pdf:
     pdf.savefig(fig)
 plt.close()
 
-print("Done!")
+print("Done! Timeline saved.")
