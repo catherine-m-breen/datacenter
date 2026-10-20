@@ -23,8 +23,8 @@ OUTPUT_DIR = './nldas_station_reports'
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # NLDAS Variable names
-NLDAS_TMP = 'TMP'      
-NLDAS_SPFH = 'SPFH'    
+NLDAS_TMP = 'Tair'      
+NLDAS_SPFH = 'Qair'    
 
 REGIONS = {
     'VA': {'lat': (38.5, 39.5), 'lon': (-78.0, -77.0)},
