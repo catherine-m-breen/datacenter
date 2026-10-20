@@ -27,8 +27,8 @@ NLDAS_TMP = 'Tair'
 NLDAS_SPFH = 'Qair'    
 
 REGIONS = {
-    'VA': {'lat': (38.5, 39.5), 'lon': (-78.0, -77.0)}# ,
-   # 'TX': {'lat': (32.3, 33.3), 'lon': (-97.5, -96.5)}
+    'VA': {'lat': (38.5, 39.5), 'lon': (-78.0, -77.0)},
+    'TX': {'lat': (32.3, 33.3), 'lon': (-97.5, -96.5)}
 }
 
 P_HPA = 1013.25  
@@ -74,16 +74,17 @@ master_data = {'T_C': {'obs': [], 'sim': []}, 'RH': {'obs': [], 'sim': []}, 'Ent
 for file_idx, stn_file in enumerate(station_files):
     stn_name = os.path.basename(stn_file).replace('.csv', '')
     state = stn_name[:2]
-    print(f"\n--- Processing [{file_idx+1}/{len(station_files)}] {stn_name} ---")
+    print(f"\n=======================================================")
+    print(f"--- Processing [{file_idx+1}/{len(station_files)}] {stn_name} ---")
     
     # --- 1. Load Station Data ---
     df_stn = pd.read_csv(stn_file)
+    print(f"  -> [DEBUG] Loaded {len(df_stn)} raw rows from Station CSV.")
     
     # Automatically filter out -99.0 and -9999.0 error flags
     df_stn.replace([-99.0, -99.000, -9999.0], np.nan, inplace=True)
     
     df_stn['datetime'] = pd.to_datetime(df_stn['datetime'], errors='coerce').dt.tz_localize(None)
-    # ROUND TO NEAREST HOUR TO GUARANTEE MATCH
     df_stn['datetime'] = df_stn['datetime'].dt.round('H') 
     
     stn_lat = df_stn['latitude'].iloc[0]
@@ -93,6 +94,9 @@ for file_idx, stn_file in enumerate(station_files):
     df_stn = calc_psychrometrics(df_stn, source='station')
     df_stn = df_stn.set_index('datetime')
     
+    print(f"  -> [DEBUG] Station Time Range: {df_stn.index.min()} to {df_stn.index.max()}")
+    print(f"  -> [DEBUG] Valid Station Temps available: {df_stn['T_C'].count()} / {len(df_stn)}")
+    
     # --- 2. Load NLDAS Data ---
     if PROCESS_ALL_YEARS:
         nldas_pattern = os.path.join(NLDAS_DIR, '*', '*.nc')
@@ -101,10 +105,10 @@ for file_idx, stn_file in enumerate(station_files):
         
     nldas_files = sorted(glob.glob(nldas_pattern))
     if not nldas_files:
-        print("  -> No NLDAS files found for pattern. Skipping.")
+        print("  -> [ERROR] No NLDAS files found for pattern. Skipping.")
         continue
 
-    print(f"  -> Found {len(nldas_files)} NLDAS files. Extracting point sequentially...")
+    print(f"  -> [DEBUG] Found {len(nldas_files)} NLDAS files. Extracting point sequentially...")
     
     df_list = []
     for f in nldas_files:
@@ -120,11 +124,13 @@ for file_idx, stn_file in enumerate(station_files):
             pass
             
     if not df_list:
-        print(f"  -> Could not extract valid data for {stn_name}. Skipping.")
+        print(f"  -> [ERROR] Could not extract valid data for {stn_name}. Skipping.")
         continue
         
     df_nldas = pd.concat(df_list, ignore_index=True)
     df_nldas = df_nldas.rename(columns={'time': 'datetime'})
+    
+    print(f"  -> [DEBUG] Extracted {len(df_nldas)} raw rows from NLDAS files.")
     
     # ROUND TO NEAREST HOUR TO GUARANTEE MATCH
     df_nldas['datetime'] = df_nldas['datetime'].dt.round('H')
@@ -138,21 +144,25 @@ for file_idx, stn_file in enumerate(station_files):
     df_nldas = calc_psychrometrics(df_nldas, source='nldas')
     df_nldas = df_nldas.set_index('datetime')
     
-    # --- 3. Merge Datasets ---
-    print(f"  -> Station Data Range: {df_stn.index.min()} to {df_stn.index.max()}")
-    print(f"  -> NLDAS Data Range:   {df_nldas.index.min()} to {df_nldas.index.max()}")
+    print(f"  -> [DEBUG] NLDAS Time Range: {df_nldas.index.min()} to {df_nldas.index.max()}")
+    print(f"  -> [DEBUG] Checking alignment formats:")
+    print(f"       Station index type: {type(df_stn.index[0])} | Sample: {df_stn.index[0]}")
+    print(f"       NLDAS index type:   {type(df_nldas.index[0])} | Sample: {df_nldas.index[0]}")
     
+    # --- 3. Merge Datasets ---
+    print("  -> Aligning time series...")
     merged = df_stn[['T_C', 'RH_obs', 'Enthalpy_kJ_kg']].join(
         df_nldas[['T_C', 'RH_derived', 'Enthalpy_kJ_kg']], 
         lsuffix='_obs', rsuffix='_sim', how='inner'
     )
     
+    print(f"  -> [DEBUG] INNER JOIN Result: {len(merged)} overlapping rows found.")
+    
     if merged.empty:
         print("  -> [ERROR] Merged dataset is empty! No overlapping hours found between Station and NLDAS.")
-        print("  -> PDFs will be blank. Try setting PROCESS_ALL_YEARS = True.")
+        print("  -> PDFs will be blank. Check the date ranges above to ensure they overlap.")
         continue
         
-    print(f"  -> Successfully aligned {len(merged)} overlapping hourly records.")
     merged['season'] = merged.index.month.map(get_season)
 
     # --- 4. Output PDF ---
@@ -224,6 +234,8 @@ for file_idx, stn_file in enumerate(station_files):
         
         for ax, (obs_col, sim_col, title, dict_key) in zip(axes, vars_to_plot):
             clean = merged.dropna(subset=[obs_col, sim_col])
+            print(f"    -> [DEBUG] Scatter {dict_key}: {len(clean)} valid pairs found (after dropping NaNs).")
+            
             if len(clean) > 10:
                 obs, sim = clean[obs_col], clean[sim_col]
                 
@@ -272,7 +284,8 @@ for file_idx, stn_file in enumerate(station_files):
 # ==========================================
 # MASTER OVERALL SUMMARY PLOT
 # ==========================================
-print("\nGenerating ALL STATIONS Master Summary...")
+print("\n=======================================================")
+print("Generating ALL STATIONS Master Summary...")
 master_pdf_path = os.path.join(OUTPUT_DIR, "ALL_STATIONS_MASTER_SUMMARY.pdf")
 
 with PdfPages(master_pdf_path) as pdf:
