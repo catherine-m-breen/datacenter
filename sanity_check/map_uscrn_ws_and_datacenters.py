@@ -13,7 +13,7 @@ warnings.filterwarnings('ignore')
 # CONFIGURATION
 # ==========================================
 STATION_DIR = '/discover/nobackup/cmbreen/datacenters/uscrn_independent_data'
-DATACENTER_CSV = 'im3_open_source_data_center_atlas_v2026.02.09.csv'
+DATACENTER_CSV = '/discover/nobackup/cmbreen/datacenters/data/im3_open_source_data_center_atlas_v2026.02.09.csv'
 OUTPUT_PDF = './master_station_datacenter_map.pdf'
 
 # ==========================================
