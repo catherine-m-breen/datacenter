@@ -27,8 +27,8 @@ NLDAS_TMP = 'Tair'
 NLDAS_SPFH = 'Qair'    
 
 REGIONS = {
-    'VA': {'lat': (38.5, 39.5), 'lon': (-78.0, -77.0)},
-    'TX': {'lat': (32.3, 33.3), 'lon': (-97.5, -96.5)}
+    'VA': {'lat': (38.5, 39.5), 'lon': (-78.0, -77.0)}# ,
+   # 'TX': {'lat': (32.3, 33.3), 'lon': (-97.5, -96.5)}
 }
 
 P_HPA = 1013.25  
@@ -76,9 +76,16 @@ for file_idx, stn_file in enumerate(station_files):
     state = stn_name[:2]
     print(f"\n--- Processing [{file_idx+1}/{len(station_files)}] {stn_name} ---")
     
-    # Load Station Data
+    # --- 1. Load Station Data ---
     df_stn = pd.read_csv(stn_file)
+    
+    # Automatically filter out -99.0 and -9999.0 error flags
+    df_stn.replace([-99.0, -99.000, -9999.0], np.nan, inplace=True)
+    
     df_stn['datetime'] = pd.to_datetime(df_stn['datetime'], errors='coerce').dt.tz_localize(None)
+    # ROUND TO NEAREST HOUR TO GUARANTEE MATCH
+    df_stn['datetime'] = df_stn['datetime'].dt.round('H') 
+    
     stn_lat = df_stn['latitude'].iloc[0]
     stn_lon = df_stn['longitude'].iloc[0]
     
@@ -86,7 +93,7 @@ for file_idx, stn_file in enumerate(station_files):
     df_stn = calc_psychrometrics(df_stn, source='station')
     df_stn = df_stn.set_index('datetime')
     
-    # Identify NLDAS Files
+    # --- 2. Load NLDAS Data ---
     if PROCESS_ALL_YEARS:
         nldas_pattern = os.path.join(NLDAS_DIR, '*', '*.nc')
     else:
@@ -94,40 +101,34 @@ for file_idx, stn_file in enumerate(station_files):
         
     nldas_files = sorted(glob.glob(nldas_pattern))
     if not nldas_files:
-        print("No NLDAS files found for pattern. Skipping.")
+        print("  -> No NLDAS files found for pattern. Skipping.")
         continue
 
-    # --- THE FIX: Safe Sequential Extraction for HPC Login Nodes ---
-    print(f"Found {len(nldas_files)} NLDAS files. Extracting point sequentially (HPC safe mode)...")
+    print(f"  -> Found {len(nldas_files)} NLDAS files. Extracting point sequentially...")
     
     df_list = []
     for f in nldas_files:
         try:
-            # 'with' ensures the file handle is completely closed before opening the next
             with xr.open_dataset(f, engine='netcdf4') as ds:
                 lat_var = 'lat' if 'lat' in ds.coords else 'latitude'
                 lon_var = 'lon' if 'lon' in ds.coords else 'longitude'
                 
-                # Extract the single point
                 pt = ds.sel({lat_var: stn_lat, lon_var: stn_lon}, method='nearest')
-                
-                # Convert to dataframe and only keep required columns to save memory
                 df_pt = pt[[NLDAS_TMP, NLDAS_SPFH]].to_dataframe().reset_index()
                 df_list.append(df_pt)
         except Exception as e:
-            # If one file is corrupted, skip it instead of crashing the whole script
             pass
             
     if not df_list:
-        print(f"Could not extract valid data for {stn_name}. Skipping.")
+        print(f"  -> Could not extract valid data for {stn_name}. Skipping.")
         continue
         
-    # Combine all individual hours into one dataframe
     df_nldas = pd.concat(df_list, ignore_index=True)
     df_nldas = df_nldas.rename(columns={'time': 'datetime'})
-    # --------------------------------------------------------------
-
-    # Handle Kelvin to Celsius if necessary
+    
+    # ROUND TO NEAREST HOUR TO GUARANTEE MATCH
+    df_nldas['datetime'] = df_nldas['datetime'].dt.round('H')
+    
     if df_nldas[NLDAS_TMP].mean() > 200: 
         df_nldas['T_C'] = df_nldas[NLDAS_TMP] - 273.15
     else:
@@ -137,17 +138,26 @@ for file_idx, stn_file in enumerate(station_files):
     df_nldas = calc_psychrometrics(df_nldas, source='nldas')
     df_nldas = df_nldas.set_index('datetime')
     
-    # Merge
-    print("Aligning time series...")
+    # --- 3. Merge Datasets ---
+    print(f"  -> Station Data Range: {df_stn.index.min()} to {df_stn.index.max()}")
+    print(f"  -> NLDAS Data Range:   {df_nldas.index.min()} to {df_nldas.index.max()}")
+    
     merged = df_stn[['T_C', 'RH_obs', 'Enthalpy_kJ_kg']].join(
         df_nldas[['T_C', 'RH_derived', 'Enthalpy_kJ_kg']], 
         lsuffix='_obs', rsuffix='_sim', how='inner'
     )
+    
+    if merged.empty:
+        print("  -> [ERROR] Merged dataset is empty! No overlapping hours found between Station and NLDAS.")
+        print("  -> PDFs will be blank. Try setting PROCESS_ALL_YEARS = True.")
+        continue
+        
+    print(f"  -> Successfully aligned {len(merged)} overlapping hourly records.")
     merged['season'] = merged.index.month.map(get_season)
 
-    # Output PDF
+    # --- 4. Output PDF ---
     pdf_path = os.path.join(OUTPUT_DIR, f"{stn_name}_analysis.pdf")
-    print(f"Generating PDF: {pdf_path}")
+    print(f"  -> Generating PDF: {pdf_path}")
     
     with PdfPages(pdf_path) as pdf:
         
@@ -176,7 +186,13 @@ for file_idx, stn_file in enumerate(station_files):
         pdf.savefig(fig); plt.close()
         
         # --- PAGE 2: TIMESERIES ---
-        merged_sample = merged[merged.index.year == 2018]
+        # Look for overlap in 2018. If none, grab the first available year in the merged data
+        sample_year = 2018
+        merged_sample = merged[merged.index.year == sample_year]
+        if merged_sample.empty:
+            sample_year = merged.index.year[0]
+            merged_sample = merged[merged.index.year == sample_year]
+            
         if not merged_sample.empty:
             fig, axes = plt.subplots(3, 1, figsize=(12, 10), sharex=True)
             
@@ -184,7 +200,7 @@ for file_idx, stn_file in enumerate(station_files):
             axes[0].plot(merged_sample.index, merged_sample['T_C_sim'], label='NLDAS3', alpha=0.7)
             axes[0].set_ylabel("Temperature (°C)")
             axes[0].legend()
-            axes[0].set_title("2018 Time Series Comparison")
+            axes[0].set_title(f"{sample_year} Time Series Comparison")
             
             axes[1].plot(merged_sample.index, merged_sample['RH_obs'], alpha=0.7)
             axes[1].plot(merged_sample.index, merged_sample['RH_derived'], alpha=0.7)
