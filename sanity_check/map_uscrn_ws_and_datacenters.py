@@ -5,6 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 from matplotlib.backends.backend_pdf import PdfPages
+from matplotlib.ticker import FuncFormatter  # <-- NEW IMPORT
 import warnings
 
 warnings.filterwarnings('ignore')
@@ -46,12 +47,11 @@ df_dc = pd.read_csv(DATACENTER_CSV)
 df_dc = df_dc.dropna(subset=['lat', 'lon'])  # Remove any rows missing coordinates
 print(f" -> Loaded {len(df_dc)} data center locations.")
 
-# To prevent thousands of overlapping 1x1 boxes from turning solid black,
-# we round the coordinates to the nearest whole degree to group nearby data centers 
-# into unique 1x1 degree regional grid boxes.
-df_dc['grid_lat'] = df_dc['lat'].round(0)
-df_dc['grid_lon'] = df_dc['lon'].round(0)
-unique_dc_regions = df_dc[['grid_lat', 'grid_lon']].drop_duplicates()
+# --- DEFINE CURRENT FOCUS AREAS ---
+focus_areas = [
+    {'lat_min': 38.5, 'lat_max': 39.5, 'lon_min': -78.0, 'lon_max': -77.0},
+    {'lat_min': 32.3, 'lat_max': 33.3, 'lon_min': -97.5, 'lon_max': -96.5}
+]
 
 # ==========================================
 # 3. GENERATE MAP PDF
@@ -60,7 +60,7 @@ print(f"Generating Map PDF: {OUTPUT_PDF}")
 
 with PdfPages(OUTPUT_PDF) as pdf:
     fig = plt.figure(figsize=(16, 10))
-    fig.suptitle("USCRN Weather Stations vs. US Data Center Atlas\nWith 1°x1° Regional Datacenter Extraction Grids", fontsize=18, fontweight='bold', y=0.96)
+    fig.suptitle("", fontsize=18, fontweight='bold', y=0.96)
 
     # Setup Custom Map Layout [left, bottom, width, height]
     ax_main = fig.add_axes([0.1, 0.2, 0.8, 0.75])    # CONUS
@@ -90,29 +90,25 @@ with PdfPages(OUTPUT_PDF) as pdf:
         if has_geopandas:
             usa.boundary.plot(ax=ax, color='black', linewidth=0.8, alpha=0.5)
             
-        # 2. Draw 1°x1° Data Center Regions (Light Grey Boxes)
-        for _, row in unique_dc_regions.iterrows():
-            center_lat = row['grid_lat']
-            center_lon = row['grid_lon']
-            
-            # 1 degree box centered on the coordinate
-            lon_min, lon_max = center_lon - 0.5, center_lon + 0.5
-            lat_min, lat_max = center_lat - 0.5, center_lat + 0.5
+        # 2. Draw Current Focus Areas (Light Grey Boxes)
+        for area in focus_areas:
+            lon_min, lon_max = area['lon_min'], area['lon_max']
+            lat_min, lat_max = area['lat_min'], area['lat_max']
+            center_lat = (lat_min + lat_max) / 2
+            center_lon = (lon_min + lon_max) / 2
             
             # Check if this box is inside the current subplot bounds
             if (x_bounds[0] <= center_lon <= x_bounds[1]) and (y_bounds[0] <= center_lat <= y_bounds[1]):
                 rect = Rectangle((lon_min, lat_min), lon_max - lon_min, lat_max - lat_min, 
-                                 linewidth=1, edgecolor='dimgrey', facecolor='lightgrey', alpha=0.3, 
-                                 label='1°x1° Extraction Region' if (region == 'CONUS' and '1°x1° Extraction Region' not in ax.get_legend_handles_labels()[1]) else "")
+                                 linewidth=1.5, edgecolor='dimgrey', facecolor='lightgrey', alpha=0.5, 
+                                 label='Current Focus Area' if (region == 'CONUS' and 'Current Focus Area' not in ax.get_legend_handles_labels()[1]) else "")
                 ax.add_patch(rect)
 
         # 3. Plot EXACT Data Center Locations (Dark Grey Dots)
-        # Using zorder=2 ensures they plot on top of the grey boxes
         ax.scatter(df_dc['lon'], df_dc['lat'], c='black', s=10, alpha=0.6, marker='o', zorder=2,
                    label='Data Center (IM3 Atlas)' if region == 'CONUS' else "")
 
         # 4. Plot USCRN Weather Stations (Purple Stars)
-        # Using zorder=3 ensures the stations stand out on top of everything
         ax.scatter(stn_lons, stn_lats, c='#9b59b6', s=90, marker='o', edgecolor='black', linewidth=0.5, zorder=3,
                    label='USCRN Station' if region == 'CONUS' else "")
         
@@ -127,6 +123,22 @@ with PdfPages(OUTPUT_PDF) as pdf:
             ax.set_xticks([])
             ax.set_yticks([])
         else:
+            # --- NEW: Format Lat/Lon Tick Labels ---
+            def format_lon(val, pos):
+                if val < 0:   return f"{abs(int(val))}°W"
+                elif val > 0: return f"{int(val)}°E"
+                else:         return "0°"
+                
+            def format_lat(val, pos):
+                if val > 0:   return f"{int(val)}°N"
+                elif val < 0: return f"{abs(int(val))}°S"
+                else:         return "0°"
+
+            ax.xaxis.set_major_formatter(FuncFormatter(format_lon))
+            ax.yaxis.set_major_formatter(FuncFormatter(format_lat))
+            
+            # Since the labels now clearly indicate directions, you might not even 
+            # need these text labels, but I left them just in case.
             ax.set_xlabel("Longitude")
             ax.set_ylabel("Latitude")
 

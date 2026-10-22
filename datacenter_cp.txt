@@ -11,3 +11,12 @@ scp -r cmbreen@discover.nccs.nasa.gov:/discover/nobackup/cmbreen/datacenters/dat
 
 scp -r cmbreen@discover.nccs.nasa.gov:/discover/nobackup/cmbreen/datacenters/datacenter/sanity_check/nldas_station_reports/VA_Cape_Charles_5_ENE_USCRN_hourly_analysis.pdf ~/Desktop/
 
+
+
+scp -r cmbreen@discover.nccs.nasa.gov:/discover/nobackup/cmbreen/datacenters/datacenter/sanity_check/master_station_datacenter_map.pdf ~/Desktop/
+
+scp -r cmbreen@discover.nccs.nasa.gov:/discover/nobackup/cmbreen/datacenters/datacenter/sanity_check/missing_data_timeline.pdf ~/Desktop/
+
+
+scp -r cmbreen@discover.nccs.nasa.gov:/discover/nobackup/cmbreen/datacenters/datacenter/sanity_check/*.pdf /Users/cmbreen/Library/CloudStorage/OneDrive-NASA/oasis_datacenter/nldas_uscrn_tmy_bias_analysis
+

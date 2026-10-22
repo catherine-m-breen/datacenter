@@ -19,7 +19,7 @@ OUTPUT_DIR = './station_qaqc_reports'
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # Define the columns we want to inspect
-VARS_TO_CHECK = ['temperature', 'relative_humidity', 'precipitation']
+VARS_TO_CHECK = ['temperature', 'relative_humidity']
 
 # Define units for plotting
 UNITS = {
