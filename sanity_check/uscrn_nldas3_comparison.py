@@ -14,6 +14,7 @@ warnings.filterwarnings('ignore')
 # CONFIGURATION TOGGLES
 # ==========================================
 PROCESS_ALL_YEARS = False     # False = 2018 only, True = All available years
+PLOT_EVERY_YEAR_TS = True     # True = Generate a timeseries plot for EVERY year in the individual PDF
 PROCESS_ALL_STATIONS = False  # False = VA & TX only, True = All stations in directory
 
 NLDAS_DIR = '/discover/nobackup/projects/eis_nldas3/DATA/forcing/hourly'
@@ -32,6 +33,11 @@ REGIONS = {
 }
 
 P_HPA = 1013.25  
+
+# Variables for plotting loops (Moved globally so summary plot always works)
+VARS_TO_PLOT = [('T_C_obs', 'T_C_sim', 'Temp (°C)', 'T_C'),
+                ('RH_obs', 'RH_derived', 'Rel. Humidity (%)', 'RH'),
+                ('Enthalpy_kJ_kg_obs', 'Enthalpy_kJ_kg_sim', 'Enthalpy (kJ/kg)', 'Enthalpy')]
 
 # ==========================================
 # HELPER FUNCTIONS
@@ -154,48 +160,47 @@ for file_idx, stn_file in enumerate(station_files):
         continue
         
     merged['season'] = merged.index.month.map(get_season)
+    merged['Station'] = stn_name  # Track station name for the master summary
     master_df_list.append(merged) # Append to master dataset for global analysis
-
-    # Variables for plotting loops
-    vars_to_plot = [('T_C_obs', 'T_C_sim', 'Temp (°C)', 'T_C'),
-                    ('RH_obs', 'RH_derived', 'Rel. Humidity (%)', 'RH'),
-                    ('Enthalpy_kJ_kg_obs', 'Enthalpy_kJ_kg_sim', 'Enthalpy (kJ/kg)', 'Enthalpy')]
 
     # --- 4. INDIVIDUAL STATION PDF ---
     pdf_path = os.path.join(OUTPUT_DIR, f"{stn_name}_analysis.pdf")
     
     with PdfPages(pdf_path) as pdf:
-        # PAGE 1: MAP
-        fig, ax = plt.subplots(figsize=(8, 6))
-        ax.scatter(stn_lon, stn_lat, c='red', marker='*', s=200, label=f'Station: {stn_name}')
-        ax.set_title(f"Location of {stn_name}"); ax.grid(True, linestyle='--'); ax.legend()
-        pdf.savefig(fig); plt.close()
         
-        # PAGE 2: TIMESERIES
-        sample_year = 2018
-        merged_sample = merged[merged.index.year == sample_year]
-        if merged_sample.empty: merged_sample = merged[merged.index.year == merged.index.year[0]]
+        # Determine which years to plot based on toggle
+        if PROCESS_ALL_YEARS and PLOT_EVERY_YEAR_TS:
+            years_to_plot = sorted(merged.index.year.unique())
+        else:
+            sample_year = 2018
+            if sample_year in merged.index.year:
+                years_to_plot = [sample_year]
+            else:
+                years_to_plot = [merged.index.year[0]]
+                
+        # TIMESERIES (Loops for all years if toggle is True)
+        for yr in years_to_plot:
+            merged_yr = merged[merged.index.year == yr]
+            if not merged_yr.empty:
+                fig, axes = plt.subplots(3, 1, figsize=(12, 10), sharex=True)
+                axes[0].plot(merged_yr.index, merged_yr['T_C_obs'], label='Station', alpha=0.7)
+                axes[0].plot(merged_yr.index, merged_yr['T_C_sim'], label='NLDAS3', alpha=0.7)
+                axes[0].set_ylabel("Temp (°C)"); axes[0].legend(); axes[0].set_title(f"{yr} Time Series")
+                
+                axes[1].plot(merged_yr.index, merged_yr['RH_obs'], alpha=0.7)
+                axes[1].plot(merged_yr.index, merged_yr['RH_derived'], alpha=0.7)
+                axes[1].set_ylabel("RH (%)")
+                
+                axes[2].plot(merged_yr.index, merged_yr['Enthalpy_kJ_kg_obs'], alpha=0.7)
+                axes[2].plot(merged_yr.index, merged_yr['Enthalpy_kJ_kg_sim'], alpha=0.7)
+                axes[2].set_ylabel("Enthalpy (kJ/kg)"); axes[2].set_xlabel("Date")
+                
+                plt.tight_layout(); pdf.savefig(fig); plt.close()
             
-        if not merged_sample.empty:
-            fig, axes = plt.subplots(3, 1, figsize=(12, 10), sharex=True)
-            axes[0].plot(merged_sample.index, merged_sample['T_C_obs'], label='Station', alpha=0.7)
-            axes[0].plot(merged_sample.index, merged_sample['T_C_sim'], label='NLDAS3', alpha=0.7)
-            axes[0].set_ylabel("Temp (°C)"); axes[0].legend(); axes[0].set_title(f"{sample_year} Time Series")
-            
-            axes[1].plot(merged_sample.index, merged_sample['RH_obs'], alpha=0.7)
-            axes[1].plot(merged_sample.index, merged_sample['RH_derived'], alpha=0.7)
-            axes[1].set_ylabel("RH (%)")
-            
-            axes[2].plot(merged_sample.index, merged_sample['Enthalpy_kJ_kg_obs'], alpha=0.7)
-            axes[2].plot(merged_sample.index, merged_sample['Enthalpy_kJ_kg_sim'], alpha=0.7)
-            axes[2].set_ylabel("Enthalpy (kJ/kg)"); axes[2].set_xlabel("Date")
-            
-            plt.tight_layout(); pdf.savefig(fig); plt.close()
-            
-        # PAGE 3: OVERALL SCATTER (1x3 Grid)
+        # OVERALL SCATTER (1x3 Grid)
         fig, axes = plt.subplots(1, 3, figsize=(18, 5))
         
-        for ax, (obs_col, sim_col, title, dict_key) in zip(axes, vars_to_plot):
+        for ax, (obs_col, sim_col, title, dict_key) in zip(axes, VARS_TO_PLOT):
             clean = merged.dropna(subset=[obs_col, sim_col])
             if len(clean) > 10:
                 obs, sim = clean[obs_col], clean[sim_col]
@@ -206,6 +211,11 @@ for file_idx, stn_file in enumerate(station_files):
                 ax.set_title(f"{title}\nR²: {r2:.3f} | Bias: {bias:.3f}")
                 ax.grid(True, alpha=0.3)
         plt.tight_layout(); pdf.savefig(fig); plt.close()
+
+    # Define merged_sample for the COMBINED logic block below
+    sample_year = 2018
+    merged_sample = merged[merged.index.year == sample_year]
+    if merged_sample.empty: merged_sample = merged[merged.index.year == merged.index.year[0]]
 
     # --- 5. POPULATE COMBINED PDFS (2 Stations Per Page) ---
     if valid_stn_count % 2 == 0:
@@ -218,7 +228,7 @@ for file_idx, stn_file in enumerate(station_files):
     row_idx = valid_stn_count % 2   
     col_idx = valid_stn_count % 2   
     
-    for j, (obs_col, sim_col, title, dict_key) in enumerate(vars_to_plot):
+    for j, (obs_col, sim_col, title, dict_key) in enumerate(VARS_TO_PLOT):
         clean = merged.dropna(subset=[obs_col, sim_col])
         ax = scatter_axes[row_idx, j]
         if len(clean) > 10:
@@ -281,9 +291,9 @@ if master_df_list:
         
         # --- PAGE 1: GLOBAL HEXBIN SCATTERS (1x3) ---
         fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-        fig.suptitle("Global NLDAS-3 Validation (All Stations Combined)", fontsize=20, fontweight='bold', y=1.05)
+        fig.suptitle("Global NLDAS-3 Validation (All Data Combined)", fontsize=20, fontweight='bold', y=1.05)
         
-        for ax, (obs_col, sim_col, title, dict_key) in zip(axes, vars_to_plot):
+        for ax, (obs_col, sim_col, title, dict_key) in zip(axes, VARS_TO_PLOT):
             clean = df_global.dropna(subset=[obs_col, sim_col])
             if len(clean) > 10:
                 obs, sim = clean[obs_col], clean[sim_col]
@@ -307,7 +317,7 @@ if master_df_list:
         for season in ['Winter', 'Spring', 'Summer', 'Fall']:
             season_data = df_global[df_global['season'] == season]
             row = [season]
-            for obs_col, sim_col, _, _ in vars_to_plot:
+            for obs_col, sim_col, _, _ in VARS_TO_PLOT:
                 clean = season_data.dropna(subset=[obs_col, sim_col])
                 if len(clean) > 10:
                     r2, bias = r2_score(clean[obs_col], clean[sim_col]), np.mean(clean[sim_col] - clean[obs_col])
@@ -321,7 +331,29 @@ if master_df_list:
                          loc='center', cellLoc='center', bbox=[0, 0, 1, 1])
         table.auto_set_font_size(False)
         table.set_fontsize(14)
-        ax.set_title("GLOBAL SYSTEMIC SEASONAL BIAS\n(All Stations Combined)", pad=20, fontsize=18, fontweight='bold')
+        ax.set_title("GLOBAL SYSTEMIC SEASONAL BIAS\n(All Data Combined)", pad=20, fontsize=18, fontweight='bold')
         pdf.savefig(fig); plt.close()
+        
+        # --- PAGES 3+: INDIVIDUAL STATION SCATTER PLOTS ---
+        # Group the master dataframe by station and plot each station on its own page
+        for stn, stn_df in df_global.groupby('Station'):
+            fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+            fig.suptitle(f"Station Bias Summary: {stn} (All Processed Years)", fontsize=16, fontweight='bold', y=1.05)
+            
+            for ax, (obs_col, sim_col, title, dict_key) in zip(axes, VARS_TO_PLOT):
+                clean = stn_df.dropna(subset=[obs_col, sim_col])
+                if len(clean) > 10:
+                    obs, sim = clean[obs_col], clean[sim_col]
+                    r2, bias = r2_score(obs, sim), np.mean(sim - obs)
+                    ax.scatter(obs, sim, alpha=0.1, s=2, c='purple')
+                    mn, mx = min(obs.min(), sim.min()), max(obs.max(), sim.max())
+                    ax.plot([mn, mx], [mn, mx], 'k--')
+                    ax.set_title(f"{title}\nR²: {r2:.3f} | Bias: {bias:.3f}")
+                    ax.grid(True, alpha=0.3)
+                else:
+                    ax.text(0.5, 0.5, "Insufficient Data", ha='center', va='center')
+                    ax.axis('off')
+            plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+            pdf.savefig(fig); plt.close()
 
 print(f"\nAll operations complete! Outputs saved in: {OUTPUT_DIR}")
