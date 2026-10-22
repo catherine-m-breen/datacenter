@@ -2,7 +2,6 @@ import os
 import glob
 import numpy as np
 import pandas as pd
-#import matplotlib.subplots
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import matplotlib.lines as mlines
@@ -34,12 +33,18 @@ VARS = {
     'RH': {'title': 'Relative Humidity', 'col': 'relative_humidity'}
 }
 
-VIEWS = [
-    ('main', None, 'Timeline (2002 - 2026)'),
-    ('08', 2008, 'Timeline - 2008'),
-    ('09', 2009, 'Timeline - 2009'),
-    ('10', 2010, 'Timeline - 2010')
-]
+# Dynamically set which views to plot based on the toggle
+if PROCESS_ALL_STATIONS:
+    VIEWS = [
+        ('main', None, 'Timeline (2002 - 2026)')
+    ]
+else:
+    VIEWS = [
+        ('main', None, 'Timeline (2002 - 2026)'),
+        ('08', 2008, 'Timeline - 2008'),
+        ('09', 2009, 'Timeline - 2009'),
+        ('10', 2010, 'Timeline - 2010')
+    ]
 
 # ==========================================
 # GATHER FILES & PRE-PROCESS DATA
@@ -91,7 +96,7 @@ for stn_file in station_files:
                     df_var_miss = df_miss[df_miss[col_name].isna()][['datetime']]
                     stn_record[f'{vk}_miss'] = df_var_miss
                 else:
-                    print(f" -> [WARNING] Column '{col_name}' not found in {stn_name}{QAQC_SUFFIX}")
+                    pass # Silently skip if column is missing, won't crash
     else:
         print(f" -> [WARNING] No QAQC file found for {stn_name}. Missing data will not be plotted.")
             
