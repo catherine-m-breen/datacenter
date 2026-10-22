@@ -77,14 +77,15 @@ for stn_file in station_files:
         'Temp_miss': pd.DataFrame(),
         'RH_miss': pd.DataFrame(),
         'Temp_heat': {'Station': stn_name},
-        'RH_heat': {'Station': stn_name}
+        'RH_heat': {'Station': stn_name},
+        'Temp_total_pct': 0.0,
+        'RH_total_pct': 0.0
     }
     
     # 2. Extract Missing Data from the single file
     missing_file = os.path.join(QAQC_DIR, f"{stn_name}{QAQC_SUFFIX}")
     
     if os.path.exists(missing_file):
-        # Read the file
         df_miss = pd.read_csv(missing_file)
         if not df_miss.empty:
             df_miss['datetime'] = pd.to_datetime(df_miss['datetime'], errors='coerce', utc=True).dt.tz_localize(None)
@@ -95,8 +96,13 @@ for stn_file in station_files:
                     # Keep ONLY the rows where this specific variable is NaN (missing)
                     df_var_miss = df_miss[df_miss[col_name].isna()][['datetime']]
                     stn_record[f'{vk}_miss'] = df_var_miss
+                    
+                    # Calculate overall missing percentage for this station
+                    if total_expected_hours > 0 and not df_var_miss.empty:
+                        total_miss_count = len(df_var_miss['datetime'].drop_duplicates())
+                        stn_record[f'{vk}_total_pct'] = (total_miss_count / total_expected_hours) * 100.0
                 else:
-                    pass # Silently skip if column is missing, won't crash
+                    pass # Silently skip if column is missing
     else:
         print(f" -> [WARNING] No QAQC file found for {stn_name}. Missing data will not be plotted.")
             
@@ -124,8 +130,42 @@ for stn_file in station_files:
     all_data.append(stn_record)
 
 # ==========================================
+# CALCULATE SUMMARY STATISTICS
+# ==========================================
+print("\n--- SUMMARY STATISTICS ---")
+summary_stats = {}
+for vk, vinfo in VARS.items():
+    # Gather the total missing percentages across all stations
+    pcts = [stn[f'{vk}_total_pct'] for stn in all_data]
+    mean_pct = np.mean(pcts) if pcts else 0
+    std_pct = np.std(pcts) if pcts else 0
+    
+    summary_stats[vk] = {'mean': mean_pct, 'std': std_pct}
+    print(f"{vinfo['title']}: {mean_pct:.2f}% ± {std_pct:.2f}% missing data on average.")
+print("--------------------------\n")
+
+# ==========================================
 # PLOTTING FUNCTIONS
 # ==========================================
+def plot_summary_page(stats_dict, total_stns):
+    """Creates a text-based summary page for the PDF."""
+    fig, ax = plt.subplots(figsize=(16, 8))
+    ax.axis('off')  # Turn off the graph axes
+    
+    text = "USCRN Missing Data Summary Report\n"
+    text += "=" * 40 + "\n\n"
+    text += f"Total Stations Analyzed: {total_stns}\n"
+    text += f"Temporal Bounding: {HEATMAP_START_YEAR} - {HEATMAP_END_YEAR}\n\n"
+    text += "Overall Missing Data across operational lifespans\n"
+    text += "(Average ± Standard Deviation per station):\n\n"
+    
+    for vk, stats in stats_dict.items():
+        title = VARS[vk]['title']
+        text += f"  • {title}: {stats['mean']:.2f}% ± {stats['std']:.2f}%\n"
+        
+    ax.text(0.1, 0.8, text, fontsize=16, va='top', family='monospace')
+    return fig
+
 def plot_timeline_chunk(chunk, var_key, title, year=None):
     fig, ax = plt.subplots(figsize=(16, 8))
     y_ticks, stn_names = [], []
@@ -134,10 +174,8 @@ def plot_timeline_chunk(chunk, var_key, title, year=None):
         y_ticks.append(idx)
         stn_names.append(stn['name'])
         
-        # Grey Lifespan Line
         ax.plot([stn['start'], stn['end']], [idx, idx], color='lightgrey', linewidth=4, zorder=1)
         
-        # Red Missing Data Ticks
         df_miss = stn[f'{var_key}_miss']
         if not df_miss.empty:
             if year:
@@ -149,7 +187,7 @@ def plot_timeline_chunk(chunk, var_key, title, year=None):
 
     ax.set_yticks(y_ticks)
     ax.set_yticklabels(stn_names, fontsize=10)
-    ax.invert_yaxis() # Put Station 1 at the top of the page
+    ax.invert_yaxis()
     
     ax.set_title(title, fontsize=16, fontweight='bold', pad=20)
     ax.set_xlabel("Time", fontsize=12, fontweight='bold')
@@ -211,6 +249,13 @@ def plot_heatmap_chunk(chunk, var_key, var_title):
 # ==========================================
 print("Saving pages to PDF...")
 with PdfPages(OUTPUT_PDF) as pdf:
+    
+    # 1. Save the Summary Page first
+    summary_fig = plot_summary_page(summary_stats, len(all_data))
+    pdf.savefig(summary_fig)
+    plt.close(summary_fig)
+
+    # 2. Save all chunked plots
     chunks = [all_data[i:i + MAX_PER_PAGE] for i in range(0, len(all_data), MAX_PER_PAGE)]
     
     for vk, vinfo in VARS.items():
