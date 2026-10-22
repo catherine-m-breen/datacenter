@@ -13,9 +13,9 @@ warnings.filterwarnings('ignore')
 # ==========================================
 # CONFIGURATION TOGGLES
 # ==========================================
-PROCESS_ALL_YEARS = False     # False = 2018 only, True = All available years
+PROCESS_ALL_YEARS = True     # False = 2018 only, True = All available years
 PLOT_EVERY_YEAR_TS = True     # True = Generate a timeseries plot for EVERY year in the individual PDF
-PROCESS_ALL_STATIONS = True  # False = VA & TX only, True = All stations in directory
+PROCESS_ALL_STATIONS = False  # False = VA & TX only, True = All stations in directory
 
 NLDAS_DIR = '/discover/nobackup/projects/eis_nldas3/DATA/forcing/hourly'
 STATION_DIR = '/discover/nobackup/cmbreen/datacenters/uscrn_independent_data'
@@ -29,7 +29,7 @@ NLDAS_SPFH = 'Qair'
 
 REGIONS = {
     'VA': {'lat': (38.5, 39.5), 'lon': (-78.0, -77.0)},
-  #  'TX': {'lat': (32.3, 33.3), 'lon': (-97.5, -96.5)}
+    'TX': {'lat': (32.3, 33.3), 'lon': (-97.5, -96.5)}
 }
 
 P_HPA = 1013.25  
