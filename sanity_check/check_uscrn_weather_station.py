@@ -11,7 +11,7 @@ warnings.filterwarnings('ignore')
 # ==========================================
 # CONFIGURATION TOGGLES
 # ==========================================
-PROCESS_ALL_STATIONS = False  # False = VA & TX only, True = All stations in directory
+PROCESS_ALL_STATIONS = True  # False = VA & TX only, True = All stations in directory
 
 STATION_DIR = '/discover/nobackup/cmbreen/datacenters/uscrn_independent_data'
 OUTPUT_DIR = './station_qaqc_reports'
