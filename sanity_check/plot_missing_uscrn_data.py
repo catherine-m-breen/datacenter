@@ -14,7 +14,7 @@ warnings.filterwarnings('ignore')
 # ==========================================
 # CONFIGURATION
 # ==========================================
-PROCESS_ALL_STATIONS = False
+PROCESS_ALL_STATIONS = True
 
 STATION_DIR = '/discover/nobackup/cmbreen/datacenters/uscrn_independent_data'
 QAQC_DIR = './station_qaqc_reports' 
