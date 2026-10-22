@@ -67,7 +67,7 @@ def get_season(month):
 if PROCESS_ALL_STATIONS:
     station_files = [f for f in glob.glob(os.path.join(STATION_DIR, '*.csv')) if not os.path.basename(f).startswith('all_')]
 else:
-    station_files = glob.glob(os.path.join(STATION_DIR, 'VA_*.csv')) #+ glob.glob(os.path.join(STATION_DIR, 'TX_*.csv'))
+    station_files = glob.glob(os.path.join(STATION_DIR, 'VA_*.csv')) + glob.glob(os.path.join(STATION_DIR, 'TX_*.csv'))
 
 print(f"Total stations queued for processing: {len(station_files)}")
 
