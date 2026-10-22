@@ -13,7 +13,7 @@ warnings.filterwarnings('ignore')
 # ==========================================
 # CONFIGURATION TOGGLES
 # ==========================================
-PROCESS_ALL_YEARS = False     # False = 2018 only, True = All available years
+PROCESS_ALL_YEARS = True     # False = 2018 only, True = All available years
 PLOT_EVERY_YEAR_TS = True     # True = Generate a timeseries plot for EVERY year in the individual PDF
 PROCESS_ALL_STATIONS = False  # False = VA & TX only, True = All stations in directory
 
