@@ -31,13 +31,13 @@ except FileNotFoundError:
 # Find the column that contains the state information (case-insensitive search)
 state_col = None
 for col in df_locations.columns:
-    if 'state' in col.lower():
+    if 'state_abb' in col.lower():
         state_col = col
         break
 
 if state_col:
     # Handle both abbreviations and full names just in case
-    priority_targets = ['TX', 'TEXAS', 'IL', 'ILLINOIS', 'OH', 'OHIO', 'VA', 'VIRGINIA']
+    priority_targets = ['TX', 'IL', 'OH',  'VA', 'IL', 'IA', 'NC', 'NM', 'NE']
     
     # Assign priority 0 to target states, priority 1 to everything else
     df_locations['sort_priority'] = df_locations[state_col].apply(
@@ -59,6 +59,7 @@ else:
 # ==========================================
 # Wrapping df_locations.iterrows() in tqdm gives us a beautiful progress bar!
 for index, row in tqdm.tqdm(df_locations.iterrows(), total=len(df_locations)):
+    state = row['state_abb']
     site_id = row['id']
     lat = row['lat']
     lon = row['lon']
@@ -83,7 +84,7 @@ for index, row in tqdm.tqdm(df_locations.iterrows(), total=len(df_locations)):
             time_step=60,        
             map_variables=True   
         )
-        
+        tmy_df['state'] = state 
         tmy_df.to_csv(file_path)
        # tqdm.tqdm.write(f"  -> Success! Saved to {file_path}")
         
