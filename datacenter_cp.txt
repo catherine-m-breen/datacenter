@@ -22,3 +22,6 @@ scp -r cmbreen@discover.nccs.nasa.gov:/discover/nobackup/cmbreen/datacenters/dat
 scp -r cmbreen@discover.nccs.nasa.gov:/discover/nobackup/cmbreen/datacenters/datacenter/sanity_check/station_qaqc_reports /Users/cmbreen/Library/CloudStorage/OneDrive-NASA/oasis_datacenter/nldas_uscrn_tmy_bias_analysis
 
 scp -r cmbreen@discover.nccs.nasa.gov:/discover/nobackup/cmbreen/datacenters/datacenter/sanity_check/nldas_station_reports /Users/cmbreen/Library/CloudStorage/OneDrive-NASA/oasis_datacenter/nldas_uscrn_tmy_bias_analysis
+
+
+scp -r /Users/cmbreen/code/datacenter/tmy_comparison/tmy_data cmbreen@discover.nccs.nasa.gov:/discover/nobackup/cmbreen/datacenters/

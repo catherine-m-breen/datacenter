@@ -4,4 +4,4 @@ sanity_check/raw_noaa_daily/
 sanity_check/weather_downloads/
 tmy_data
 tmy_comparison/tmy_data
-
+tmy_data_tmp
