@@ -8,7 +8,8 @@ import tqdm
 # ==========================================
 # 1. CONFIGURATION
 # ==========================================
-INPUT_CSV = '/discover/nobackup/cmbreen/datacenters/im3_open_source_data_center_atlas_v2026.02.09.csv'
+#INPUT_CSV = '/discover/nobackup/cmbreen/datacenters/im3_open_source_data_center_atlas_v2026.02.09.csv'
+INPUT_CSV = '~/INNOVATE/im3_open_source_data_center_atlas_v2026.02.09.csv'
 BASE_OUTPUT_DIR = '/discover/nobackup/cmbreen/datacenters/nldas3_master_hourly'
 BASE_FORCING_PATH = '/discover/nobackup/projects/eis_nldas3/DATA/forcing/hourly'
 
