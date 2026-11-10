@@ -80,8 +80,10 @@ def process_single_datacenter(dc_id, lat, lon, state, utc_offset):
             temp = ds_nova['Tair'] - 273.15
             humidity = ds_nova['Qair']
             pressure = ds_nova['PSurf']
-            wind_
-            
+            wind_N = ds_nova['Wind_N']
+            wind_E = ds_nova['Wind_E']
+            Rainf = ds_nova['Rainf']
+
             W = humidity / (1.0 - humidity)
             enthalpy = 1.006 * temp + W * (2501.0 + 1.86 * temp)
             
@@ -90,6 +92,9 @@ def process_single_datacenter(dc_id, lat, lon, state, utc_offset):
                 'Qair': humidity,
                 'PSurf': pressure,
                 'enthalpy': enthalpy, 
+                'wind_N': wind_N, 
+                'wind_E': wind_E, 
+                'Rainf': Rainf, 
 
             })
 
