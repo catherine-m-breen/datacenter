@@ -12,8 +12,7 @@ import tqdm
 INPUT_CSV = '~/INNOVATE/im3_open_source_data_center_atlas_v2026.02.09.csv'
 BASE_OUTPUT_DIR = '/discover/nobackup/cmbreen/datacenters/nldas3_master_hourly'
 BASE_FORCING_PATH = '/discover/nobackup/projects/eis_nldas3/DATA/forcing/hourly'
-
-BUFFER_DEG = 0.015  # 3km bounding box
+BUFFER_DEG = 0.15  # Approx. 5-mile buffer, creating a 10x10 mile bounding box
 YEARS = range(2000, 2023)  # Adjust to the years you need
 
 os.makedirs(BASE_OUTPUT_DIR, exist_ok=True)
