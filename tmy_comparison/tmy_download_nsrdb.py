@@ -1,18 +1,23 @@
 import pandas as pd
 import requests
 import os
+
+os.environ['HTTP_PROXY'] = 'http://127.0.0.1:9000'
+os.environ['HTTPS_PROXY'] = 'http://127.0.0.1:9000'
 import time
-import IPython
+
+# Add this to stop Python from spamming warnings about bypassing SSL
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ==========================================
-# 1. CONFIGURATION - UPDATE THESE!
+# 1. CONFIGURATION
 # ==========================================
-API_KEY = 'WmQhDWC6TqGMTj9nhhkjtCQmTpgQRfdwtFd6q9LC'  # Replace with your actual API key
-EMAIL = 'catherine.m.breen@nasa.gov'  # Replace with the email you registered with
-INPUT_CSV = '/Users/cmbreen/Library/CloudStorage/OneDrive-NASA/oasis_datacenter/datasets/im3_open_source_data_center_atlas_v2026.02.09.csv'  # The name of your spreadsheet
-OUTPUT_DIR = 'tmy_data'  # Folder where all 1500 files will be saved
+API_KEY = 'WmQhDWC6TqGMTj9nhhkjtCQmTpgQRfdwtFd6q9LC'  
+EMAIL = 'catherine.m.breen@nasa.gov'  
+INPUT_CSV = '/Users/cmbreen/Library/CloudStorage/OneDrive-NASA/oasis_datacenter/datasets/im3_open_source_data_center_atlas_v2026.02.09.csv'  
+OUTPUT_DIR = 'tmy_data_nsrdb'  
 
-# Create the output folder if it doesn't exist
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # ==========================================
@@ -20,23 +25,22 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 # ==========================================
 try:
     df = pd.read_csv(INPUT_CSV)
-    #IPython.embed()
-    df = df[:10]
+    df = df[:10]  # Just testing the first 10
     print(f"Loaded {len(df)} datacenter locations.")
 except FileNotFoundError:
-    print(f"Error: Could not find {INPUT_CSV}. Please ensure it is in the same folder.")
+    print(f"Error: Could not find {INPUT_CSV}.")
     exit()
 
 # ==========================================
 # 3. DOWNLOAD LOOP
 # ==========================================
-# The API endpoint for the NSRDB TMY data
 url = "https://developer.nrel.gov/api/nsrdb/v2/solar/psm3-tmy-download.csv"
 
 for index, row in df.iterrows():
-    site_id = row['id']
-    lat = row['lat']
-    lon = row['lon']
+    # Make sure these match your CSV exactly (e.g., 'id' or 'ID', 'lat' or 'Latitude')
+    site_id = row.get('id', index)
+    lat = row.get('lat', row.get('Latitude'))
+    lon = row.get('lon', row.get('Longitude'))
     
     print(f"Downloading data for {site_id} (Lat: {lat}, Lon: {lon})...")
     
@@ -44,33 +48,29 @@ for index, row in df.iterrows():
     params = {
         'api_key': API_KEY,
         'email': EMAIL,
-        'names': 'tmy',          # This tells the database to get Typical Meteorological Year data
-        'lat': lat,
-        'lon': lon,
+        'names': 'tmy',          
+        'wkt': f'POINT({lon} {lat})',  # NREL REQUIRES Longitude FIRST inside the POINT() tag
         'attributes': 'dew_point,temperature,pressure,wind_direction,wind_speed',
-        'interval': '60'         # Hourly data; alternative is 30
+        'interval': '60'         
     }
     
     try:
-        response = requests.get(url, params=params)
+        # THE FIX: Added verify=False to bypass the NASA Zscaler firewall block
+        response = requests.get(url, params=params, verify=False)
         
-        # If the request was successful (Status Code 200)
         if response.status_code == 200:
             file_path = os.path.join(OUTPUT_DIR, f"{site_id}_tmy.csv")
             with open(file_path, 'wb') as f:
                 f.write(response.content)
             print(f"  -> Success! Saved to {file_path}")
         else:
-            # If something went wrong, print the error message from the server
-            print(f"  -> FAILED for {site_id}. Server said: {response.text}")
+            print(f"  -> FAILED for {site_id}. Server said: {response.text[:200]}")
 
     except requests.exceptions.ConnectionError:
-        print(f"  -> NETWORK ERROR! Could not reach NREL. Check your VPN, proxy, or internet connection.")
-        break  # Stops the loop completely since there's no internet
+        print(f"  -> NETWORK ERROR! Still unable to reach NREL.")
+        break  
     
-    # ==========================================
-    # 4. BE POLITE TO THE SERVER (RATE LIMITING)
-    # ==========================================
+    # Be polite to the server
     time.sleep(1)
 
 print("\nFinished processing all datacenters!")
