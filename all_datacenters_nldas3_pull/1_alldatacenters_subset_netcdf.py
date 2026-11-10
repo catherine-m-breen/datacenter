@@ -18,6 +18,23 @@ YEARS = range(2000, 2023)  # Adjust to the years you need
 
 os.makedirs(BASE_OUTPUT_DIR, exist_ok=True)
 
+
+'''
+
+==================================================
+ALL VARIABLES FOUND:
+==================================================
+Name: Tair            | Units: K          | Desc: 2-meter above ground Temperature
+Name: Qair            | Units: kg kg-1    | Desc: 2-meter above ground Specific humidity
+Name: PSurf           | Units: Pa         | Desc: Surface pressure
+Name: LWdown          | Units: W m-2      | Desc: Longwave radiation flux downwards (surface)
+Name: SWdown          | Units: W m-2      | Desc: Shortwave radiation flux downwards (surface)
+Name: Wind_N          | Units: m s-1      | Desc: 10-meter above ground Meridional wind speed
+Name: Wind_E          | Units: m s-1      | Desc: 10-meter above ground Zonal wind speed
+Name: Rainf           | Units: kg m-2     | Desc: Total precipitation
+>>> 
+
+'''
 # ==========================================
 # 2. PROCESSING FUNCTION
 # ==========================================
@@ -63,6 +80,7 @@ def process_single_datacenter(dc_id, lat, lon, state, utc_offset):
             temp = ds_nova['Tair'] - 273.15
             humidity = ds_nova['Qair']
             pressure = ds_nova['PSurf']
+            wind_
             
             W = humidity / (1.0 - humidity)
             enthalpy = 1.006 * temp + W * (2501.0 + 1.86 * temp)
@@ -71,7 +89,8 @@ def process_single_datacenter(dc_id, lat, lon, state, utc_offset):
                 'Tair_C': temp,
                 'Qair': humidity,
                 'PSurf': pressure,
-                'enthalpy': enthalpy
+                'enthalpy': enthalpy, 
+
             })
 
             # 3. TIMEZONE ADJUSTMENT (Shift to Local Standard Time for TMY comparison)
