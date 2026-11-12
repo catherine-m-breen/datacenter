@@ -443,7 +443,6 @@ def get_season(month):
 def process_station(stn_file, nldas_files, output_dir, process_all_years, plot_every_year_ts):
     stn_name = os.path.basename(stn_file).replace('.csv', '')
     
-    # --- ADDED: Get Process ID to prove parallelism ---
     pid = os.getpid()
     print(f"  [Worker PID: {pid}] ---> STARTING: {stn_name}")
     
@@ -482,7 +481,7 @@ def process_station(stn_file, nldas_files, output_dir, process_all_years, plot_e
             
     if not df_list:
         print(f"  [Worker PID: {pid}] <--- FINISHED (No NLDAS Data): {stn_name}")
-        return stn_name, None
+        return stn_name, None, []  # Return empty list for anomalies
         
     df_nldas = pd.concat(df_list, ignore_index=True)
     df_nldas = df_nldas.rename(columns={'time': 'datetime'})
@@ -505,10 +504,22 @@ def process_station(stn_file, nldas_files, output_dir, process_all_years, plot_e
     
     if merged.empty:
         print(f"  [Worker PID: {pid}] <--- FINISHED (Empty Merge): {stn_name}")
-        return stn_name, None
+        return stn_name, None, [] # Return empty list for anomalies
         
     merged['season'] = merged.index.month.map(get_season)
     merged['Station'] = stn_name
+
+    # ==========================================
+    # NEW: FLAG ANOMALOUS RH YEARS
+    # ==========================================
+    suspicious_years = []
+    for yr in merged.index.year.unique():
+        yr_data = merged[merged.index.year == yr]
+        valid_rh = yr_data['RH_obs'].dropna()
+        
+        # If more than 75% of the valid RH data for this year is <= 1%
+        if len(valid_rh) > 0 and (valid_rh <= 1.0).mean() > 0.75:
+            suspicious_years.append(yr)
 
     # 4. Individual Station PDF Generation
     pdf_path = os.path.join(output_dir, f"{stn_name}_analysis.pdf")
@@ -552,9 +563,9 @@ def process_station(stn_file, nldas_files, output_dir, process_all_years, plot_e
                 ax.grid(True, alpha=0.3)
         plt.tight_layout(); pdf.savefig(fig); plt.close(fig)
 
-    # --- ADDED: End marker to prove parallelism ---
     print(f"  [Worker PID: {pid}] <--- FINISHED: {stn_name}")
-    return stn_name, merged
+    # Return suspicious years to main thread
+    return stn_name, merged, suspicious_years
 
 # ==========================================
 # MAIN EXECUTION THREAD
@@ -569,7 +580,6 @@ if __name__ == '__main__':
 
     print(f"Total stations queued for processing: {len(station_files)}")
 
-    # Gather NLDAS files ONCE
     if PROCESS_ALL_YEARS:
         nldas_pattern = os.path.join(NLDAS_DIR, '*', '*.nc')
     else:
@@ -585,26 +595,32 @@ if __name__ == '__main__':
     # Data structures to collect from workers
     station_dfs = {}
     master_df_list = []
+    anomaly_report = {} # NEW: Dict to hold anomalous stations and years
 
     # Run stations in Parallel
-    max_cores = min(multiprocessing.cpu_count(), len(station_files), 32) # Cap at 32 cores so we don't crash Discover
+    max_cores = min(multiprocessing.cpu_count(), len(station_files), 32)
     print(f"*** Spinning up {max_cores} parallel workers ***\n")
     
     with ProcessPoolExecutor(max_workers=max_cores) as executor:
-        # Submit all jobs
         futures = {
             executor.submit(process_station, stn, nldas_files, OUTPUT_DIR, PROCESS_ALL_YEARS, PLOT_EVERY_YEAR_TS): stn 
             for stn in station_files
         }
         
-        # Collect results as they finish
         completed = 0
         for future in as_completed(futures):
-            stn_name, merged_df = future.result()
+            # Unpack the 3rd variable (suspicious_years)
+            stn_name, merged_df, suspicious_years = future.result()
             completed += 1
+            
             if merged_df is not None:
                 station_dfs[stn_name] = merged_df
                 master_df_list.append(merged_df)
+                
+                # Store the anomalous years for the final report
+                if suspicious_years:
+                    anomaly_report[stn_name] = suspicious_years
+                    
                 print(f"[MAIN THREAD] Progress: {completed}/{len(station_files)} stations fully collected.\n")
             else:
                 print(f"[MAIN THREAD] Failed/Skipped {stn_name} (Insufficient data)\n")
@@ -621,7 +637,6 @@ if __name__ == '__main__':
     valid_stn_count = 0
     pending_save = False
     
-    # Sort alphabetical for neatness
     for stn_name in sorted(station_dfs.keys()):
         merged = station_dfs[stn_name]
         
@@ -698,7 +713,6 @@ if __name__ == '__main__':
         df_global = pd.concat(master_df_list, ignore_index=True)
         
         with PdfPages(master_pdf_path) as pdf:
-            # PAGE 1: GLOBAL HEXBIN SCATTERS (1x3)
             fig, axes = plt.subplots(1, 3, figsize=(18, 5))
             fig.suptitle("Global NLDAS-3 Validation (All Data Combined)", fontsize=20, fontweight='bold', y=1.05)
             
@@ -717,7 +731,6 @@ if __name__ == '__main__':
             plt.tight_layout(rect=[0, 0.03, 1, 0.95])
             pdf.savefig(fig); plt.close(fig)
 
-            # PAGE 2: GLOBAL SEASONAL BIAS TABLE
             fig, ax = plt.subplots(figsize=(12, 8))
             ax.axis('off')
             
@@ -742,7 +755,6 @@ if __name__ == '__main__':
             ax.set_title("GLOBAL SYSTEMIC SEASONAL BIAS\n(All Data Combined)", pad=20, fontsize=18, fontweight='bold')
             pdf.savefig(fig); plt.close(fig)
             
-            # PAGES 3+: INDIVIDUAL STATION SCATTER PLOTS
             for stn in sorted(df_global['Station'].unique()):
                 stn_df = df_global[df_global['Station'] == stn]
                 fig, axes = plt.subplots(1, 3, figsize=(18, 5))
@@ -765,3 +777,18 @@ if __name__ == '__main__':
                 pdf.savefig(fig); plt.close(fig)
 
     print(f"\nAll operations complete! Outputs saved in: {OUTPUT_DIR}")
+
+    # ==========================================
+    # FINAL ANOMALY REPORT OUTPUT
+    # ==========================================
+    if anomaly_report:
+        print("\n" + "="*60)
+        print("!!! SUSPICIOUS RH DATA DETECTED !!!")
+        print("The following stations have specific years where >75% of")
+        print("the relative humidity observations read near 0% (<= 1.0%):")
+        print("="*60)
+        for stn, years in sorted(anomaly_report.items()):
+            print(f"  -> {stn}: {years}")
+        print("="*60 + "\n")
+    else:
+        print("\nAll Good: No systemic ~0% RH anomalies detected in the processed dataset.\n")
