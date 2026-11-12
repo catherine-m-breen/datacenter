@@ -444,7 +444,7 @@ def process_station(stn_file, nldas_files, output_dir, process_all_years, plot_e
     stn_name = os.path.basename(stn_file).replace('.csv', '')
     
     pid = os.getpid()
-    print(f"  [Worker PID: {pid}] ---> STARTING: {stn_name}")
+    print(f"  [Worker PID: {pid}] ---> STARTING: {stn_name}", flush=True)
     
     # 1. Load Station Data
     df_stn = pd.read_csv(stn_file)
