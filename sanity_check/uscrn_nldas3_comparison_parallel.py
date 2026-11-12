@@ -571,6 +571,11 @@ def process_station(stn_file, nldas_files, output_dir, process_all_years, plot_e
 # MAIN EXECUTION THREAD
 # ==========================================
 if __name__ == '__main__':
+    try:
+        multiprocessing.set_start_method('spawn')
+    except RuntimeError:
+        pass # Prevents error if already set
+
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     
     if PROCESS_ALL_STATIONS:
@@ -578,7 +583,7 @@ if __name__ == '__main__':
     else:
         station_files = glob.glob(os.path.join(STATION_DIR, 'VA_*.csv')) + glob.glob(os.path.join(STATION_DIR, 'TX_*.csv'))
 
-    print(f"Total stations queued for processing: {len(station_files)}")
+    print(f"Total stations queued for processing: {len(station_files)}", flush=True)
 
     if PROCESS_ALL_YEARS:
         nldas_pattern = os.path.join(NLDAS_DIR, '*', '*.nc')
@@ -587,19 +592,17 @@ if __name__ == '__main__':
         
     nldas_files = sorted(glob.glob(nldas_pattern))
     if not nldas_files:
-        print("  -> [ERROR] No NLDAS files found for pattern. Exiting.")
+        print("  -> [ERROR] No NLDAS files found for pattern. Exiting.", flush=True)
         exit()
     
-    print(f"Located {len(nldas_files)} NLDAS files. Starting Parallel Pool...")
+    print(f"Located {len(nldas_files)} NLDAS files. Starting Parallel Pool...", flush=True)
 
-    # Data structures to collect from workers
     station_dfs = {}
     master_df_list = []
-    anomaly_report = {} # NEW: Dict to hold anomalous stations and years
+    anomaly_report = {} 
 
-    # Run stations in Parallel
     max_cores = min(multiprocessing.cpu_count(), len(station_files), 32)
-    print(f"*** Spinning up {max_cores} parallel workers ***\n")
+    print(f"*** Spinning up {max_cores} parallel workers ***\n", flush=True)
     
     with ProcessPoolExecutor(max_workers=max_cores) as executor:
         futures = {
@@ -617,13 +620,12 @@ if __name__ == '__main__':
                 station_dfs[stn_name] = merged_df
                 master_df_list.append(merged_df)
                 
-                # Store the anomalous years for the final report
                 if suspicious_years:
                     anomaly_report[stn_name] = suspicious_years
                     
-                print(f"[MAIN THREAD] Progress: {completed}/{len(station_files)} stations fully collected.\n")
+                print(f"[MAIN THREAD] Progress: {completed}/{len(station_files)} stations fully collected.", flush=True)
             else:
-                print(f"[MAIN THREAD] Failed/Skipped {stn_name} (Insufficient data)\n")
+                print(f"[MAIN THREAD] Failed/Skipped {stn_name} (Insufficient data)", flush=True)
 
     # ==========================================
     # GENERATE COMBINED PDFS (Sequentially on Main Thread)
