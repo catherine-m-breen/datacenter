@@ -103,13 +103,40 @@ for file_idx, stn_file in enumerate(station_files):
     
     df_stn['datetime'] = pd.to_datetime(df_stn['datetime'], errors='coerce').dt.tz_localize(None)
     df_stn['datetime'] = df_stn['datetime'].dt.round('h') 
-    
+
+    df_stn = calc_psychrometrics(df_stn, source='station')
+    df_stn = df_stn.set_index('datetime')
+
     stn_lat = df_stn['latitude'].iloc[0]
     stn_lon = df_stn['longitude'].iloc[0]
     
-    df_stn = calc_psychrometrics(df_stn, source='station')
-    df_stn = df_stn.set_index('datetime')
+    # df_stn = calc_psychrometrics(df_stn, source='station')
+    # df_stn = df_stn.set_index('datetime')
     
+    # ==========================================================
+    # NEW: FLAG & FILTER YEARS WITH >= 75% OF RH VALUES AT 0%
+    # ==========================================================
+    bad_years = []
+    for yr in df_stn.index.year.dropna().unique():
+        yr_data = df_stn[df_stn.index.year == yr]
+        total_rh_count = yr_data['RH_obs'].notna().sum()
+        
+        if total_rh_count > 0:
+            zero_rh_count = (yr_data['RH_obs'] == 0.0).sum()
+            pct_zero = zero_rh_count / total_rh_count
+            
+            if pct_zero >= 0.75:
+                print(f"  -> [WARNING] Flagging {yr}: {pct_zero:.1%} of RH values are 0%. Removing this year.")
+                bad_years.append(yr)
+                
+    if bad_years:
+        df_stn = df_stn[~df_stn.index.year.isin(bad_years)]
+        if df_stn.empty:
+            print(f"  -> [SKIP] {stn_name} has no valid data left after 0% RH filtering.")
+            continue
+    # ==========================================================
+
+
     # --- 2. Load NLDAS Data ---
     if PROCESS_ALL_YEARS:
         nldas_pattern = os.path.join(NLDAS_DIR, '*', '*.nc')
