@@ -707,8 +707,8 @@ def process_single_year(batch_data):
     # Dictionary to hold ONLY this year's data
     year_results = {stn: {} for stn in stn_names}
     error_count = 0
-    
-    for f in files:
+    import tqdm
+    for f in tqdm.tqdm(files):
         try:
             basename = os.path.basename(f)
             date_str = basename.split('.')[1][1:]  
@@ -733,6 +733,7 @@ def process_single_year(batch_data):
                         'qair': stn_qair.tolist(),
                         'psurf': stn_psurf.tolist()
                     }
+                    print(year, f)
         except Exception as e:
             error_count += 1
             
