@@ -99,6 +99,12 @@ for i, f in tqdm.tqdm(enumerate(nldas_files)):
             
             # Convert to pandas dataframe
             IPython.embed()
+
+            times_list.append(ds_pts[time_var].values)
+            tair_list.append(ds_pts[NLDAS_TMP].values)
+            qair_list.append(ds_pts[NLDAS_SPFH].values)
+            psurf_list.append(ds_pts[NLDAS_PSURF].values)
+            
             ## need to switch this to numpy array with lat/ long too 
             #df_pt = ds_pts[[NLDAS_TMP, NLDAS_SPFH, NLDAS_PSURF]].to_dataframe().reset_index()
             
