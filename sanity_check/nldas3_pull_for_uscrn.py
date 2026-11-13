@@ -5,28 +5,215 @@ This will hopefully minimize everything so that it just runs once
 
 '''
 
+# import os
+# import glob
+# import pandas as pd
+# import xarray as xr
+# import warnings
+
+# warnings.filterwarnings('ignore')
+
+# # ==========================================
+# # CONFIGURATION
+# # ==========================================
+# PROCESS_ALL_YEARS = True
+
+# NLDAS_DIR = '/discover/nobackup/projects/eis_nldas3/DATA/forcing/hourly'
+# STATION_DIR = '/discover/nobackup/cmbreen/datacenters/uscrn_independent_data'
+# OUTPUT_CSV = './nldas_station_reports_sequential/ALL_STATIONS_NLDAS_EXTRACTED.csv'
+
+# NLDAS_TMP = 'Tair'      
+# NLDAS_SPFH = 'Qair'    
+# NLDAS_PSURF = 'PSurf'    
+
+# os.makedirs(os.path.dirname(OUTPUT_CSV), exist_ok=True)
+
+# # ==========================================
+# # 1. GATHER ALL STATION COORDINATES
+# # ==========================================
+# print("Gathering station coordinates...")
+# station_files = [f for f in glob.glob(os.path.join(STATION_DIR, '*.csv')) if not os.path.basename(f).startswith('all_')]
+
+# station_meta = []
+# for stn_file in station_files:
+#     stn_name = os.path.basename(stn_file).replace('.csv', '')
+#     # Just read the first row to get the lat/lon
+#     df_temp = pd.read_csv(stn_file, nrows=1)
+#     if 'latitude' in df_temp.columns and 'longitude' in df_temp.columns:
+#         station_meta.append({
+#             'Station': stn_name,
+#             'lat': df_temp['latitude'].iloc[0],
+#             'lon': df_temp['longitude'].iloc[0]
+#         })
+
+# df_meta = pd.DataFrame(station_meta)
+# print(f"Found {len(df_meta)} valid stations.")
+
+# # Create Xarray DataArrays for vectorized extraction
+# lats_da = xr.DataArray(df_meta['lat'].values, dims='Station')
+# lons_da = xr.DataArray(df_meta['lon'].values, dims='Station')
+# stns_da = xr.DataArray(df_meta['Station'].values, dims='Station')
+
+# # ==========================================
+# # 2. FIND NLDAS FILES
+# # ==========================================
+# if PROCESS_ALL_YEARS:
+#     nldas_pattern = os.path.join(NLDAS_DIR, '*', '*.nc')
+# else:
+#     nldas_pattern = os.path.join(NLDAS_DIR, '2018*', '*.nc')
+    
+# nldas_files = sorted(glob.glob(nldas_pattern))
+# print(f"Found {len(nldas_files)} NLDAS files to process.")
+
+# # ==========================================
+# # 3. VECTORIZED EXTRACTION LOOP
+# # ==========================================
+# print("Starting extraction...")
+
+# # Initialize CSV with headers
+# pd.DataFrame(columns=['Station', 'datetime', 'Tair', 'Qair', 'PSurf']).to_csv(OUTPUT_CSV, index=False)
+
+# buffer = []
+# chunk_size = 100  # Write to disk every 500 files to save RAM
+
+# import IPython
+# import tqdm
+# times_list = []
+# tair_list = []
+# qair_list = []
+# psurf_list = []
+
+# import numpy as np
+# stn_names = df_meta['Station'].values
+
+# # ==========================================
+# # 1. PRE-COMPUTE GRID INDICES (THE MASSIVE SPEEDUP)
+# # ==========================================
+# print("Pre-computing nearest grid indices...")
+# nldas_files = sorted(glob.glob(os.path.join(NLDAS_DIR, '*', '*.nc')))
+
+# # Open just the first file to get the grid coordinates
+# with xr.open_dataset(nldas_files[0], engine='netcdf4') as ds_ref:
+#     lat_var = 'lat' if 'lat' in ds_ref.coords else 'latitude'
+#     lon_var = 'lon' if 'lon' in ds_ref.coords else 'longitude'
+    
+#     grid_lats = ds_ref[lat_var].values
+#     grid_lons = ds_ref[lon_var].values
+
+# # Find the exact integer index for each station ONCE
+# lat_idxs = [np.abs(grid_lats - stn_lat).argmin() for stn_lat in df_meta['lat']]
+# lon_idxs = [np.abs(grid_lons - stn_lon).argmin() for stn_lon in df_meta['lon']]
+
+# # Convert to xarray DataArrays for fast vectorized integer indexing
+# ilat_da = xr.DataArray(lat_idxs, dims='Station')
+# ilon_da = xr.DataArray(lon_idxs, dims='Station')
+
+# # ==========================================
+# # 2. INITIALIZE NESTED DICTIONARY
+# # ==========================================
+# # Structure: { "Station_1": {}, "Station_2": {} }
+# extracted_data = {stn: {} for stn in stn_names}
+
+# '''
+# Every file f is a day with 24 hours
+# '''
+# for i, f in tqdm.tqdm(enumerate(nldas_files)):
+#     try:
+#         with xr.open_dataset(f, engine='netcdf4') as ds:
+#             lat_var = 'lat' if 'lat' in ds.coords else 'latitude'
+#             lon_var = 'lon' if 'lon' in ds.coords else 'longitude'
+#             time_var = 'time' if 'time' in ds.coords else 'valid_time' 
+
+#             # --- THE MAGIC FORMULA ---
+#             # This extracts all stations at once using nearest neighbor
+#             ds_pts = ds.sel({lat_var: lats_da, lon_var: lons_da}, method='nearest')
+            
+#             # Attach the actual station names as a coordinate
+#             ds_pts = ds_pts.assign_coords(Station=stns_da)
+            
+#             # Convert to pandas dataframe
+#             basename = os.path.basename(f)
+#             date_str = basename.split('.')[1][1:]  
+#             yearmonth = date_str[:6]               
+#             day = date_str   
+#             import netCDF4 as nc
+#             with nc.Dataset(f, 'r') as root:
+#                 tair_var = root.variables[NLDAS_TMP]
+#                 qair_var = root.variables[NLDAS_SPFH]
+#                 psurf_var = root.variables[NLDAS_PSURF]
+#                 IPython.embed()
+#                 import tqdm 
+#                 for stn_name, y_idx, x_idx in tqdm.tqdm(zip(stn_names, lat_idxs, lon_idxs)):
+#                     stn_tair = tair_var[:, y_idx, x_idx].filled(np.nan)
+#                     stn_qair = qair_var[:, y_idx, x_idx].filled(np.nan)
+#                     stn_psurf = psurf_var[:, y_idx, x_idx].filled(np.nan)
+                    
+#                     if yearmonth not in extracted_data[stn_name]:
+#                         extracted_data[stn_name][yearmonth] = {}
+                        
+#                     extracted_data[stn_name][yearmonth][day] = {
+#                         'tair': stn_tair.tolist(),
+#                         'qair': stn_qair.tolist(),
+#                         'psurf': stn_psurf.tolist()
+#                     }
+#                     #print(stn_name)
+#                 print(f)
+#             # times_list.append(ds_pts[time_var].values)
+#             # tair_list.append(ds_pts[NLDAS_TMP].values)
+#             # qair_list.append(ds_pts[NLDAS_SPFH].values)
+#             # psurf_list.append(ds_pts[NLDAS_PSURF].values)
+            
+#             # ## need to switch this to numpy array with lat/ long too 
+#             # #df_pt = ds_pts[[NLDAS_TMP, NLDAS_SPFH, NLDAS_PSURF]].to_dataframe().reset_index()
+            
+#             # # Clean up columns (rename 'time' to 'datetime')
+#             # time_var = 'time' if 'time' in df_pt.columns else 'valid_time'
+#             # df_pt = df_pt.rename(columns={time_var: 'datetime'})
+            
+#             # # Keep only what we need
+#             # df_pt = df_pt[['Station', 'datetime', NLDAS_TMP, NLDAS_SPFH, NLDAS_PSURF]]
+            
+#             buffer.append(df_pt)
+#             print(f)
+            
+#     except Exception as e:
+#         print(f"Error reading {f}: {e}")
+        
+#     # Write to disk in chunks to prevent memory overload
+#     if (i + 1) % chunk_size == 0 or (i + 1) == len(nldas_files):
+#         if buffer:
+#             chunk_df = pd.concat(buffer, ignore_index=True)
+#             chunk_df.to_csv(OUTPUT_CSV, mode='a', header=False, index=False)
+#             buffer = [] # clear memory
+#         print(f"Processed {i + 1}/{len(nldas_files)} files...")
+
+# print(f"\nExtraction complete! Saved to {OUTPUT_CSV}")
+
+
 import os
 import glob
+import json
+import numpy as np
 import pandas as pd
 import xarray as xr
+import netCDF4 as nc
 import warnings
+from tqdm import tqdm
 
 warnings.filterwarnings('ignore')
 
 # ==========================================
 # CONFIGURATION
 # ==========================================
-PROCESS_ALL_YEARS = True
-
 NLDAS_DIR = '/discover/nobackup/projects/eis_nldas3/DATA/forcing/hourly'
 STATION_DIR = '/discover/nobackup/cmbreen/datacenters/uscrn_independent_data'
-OUTPUT_CSV = './nldas_station_reports_sequential/ALL_STATIONS_NLDAS_EXTRACTED.csv'
+OUTPUT_JSON = './nldas_station_reports_sequential/ALL_STATIONS_NLDAS.json'
 
 NLDAS_TMP = 'Tair'      
 NLDAS_SPFH = 'Qair'    
-NLDAS_PSURF = 'PSurf'    
+NLDAS_PSURF = 'Psurf' # Fixed case, usually Psurf in NLDAS
 
-os.makedirs(os.path.dirname(OUTPUT_CSV), exist_ok=True)
+os.makedirs(os.path.dirname(OUTPUT_JSON), exist_ok=True)
 
 # ==========================================
 # 1. GATHER ALL STATION COORDINATES
@@ -37,7 +224,6 @@ station_files = [f for f in glob.glob(os.path.join(STATION_DIR, '*.csv')) if not
 station_meta = []
 for stn_file in station_files:
     stn_name = os.path.basename(stn_file).replace('.csv', '')
-    # Just read the first row to get the lat/lon
     df_temp = pd.read_csv(stn_file, nrows=1)
     if 'latitude' in df_temp.columns and 'longitude' in df_temp.columns:
         station_meta.append({
@@ -47,52 +233,19 @@ for stn_file in station_files:
         })
 
 df_meta = pd.DataFrame(station_meta)
+stn_names = df_meta['Station'].values
 print(f"Found {len(df_meta)} valid stations.")
-
-# Create Xarray DataArrays for vectorized extraction
-lats_da = xr.DataArray(df_meta['lat'].values, dims='Station')
-lons_da = xr.DataArray(df_meta['lon'].values, dims='Station')
-stns_da = xr.DataArray(df_meta['Station'].values, dims='Station')
 
 # ==========================================
 # 2. FIND NLDAS FILES
 # ==========================================
-if PROCESS_ALL_YEARS:
-    nldas_pattern = os.path.join(NLDAS_DIR, '*', '*.nc')
-else:
-    nldas_pattern = os.path.join(NLDAS_DIR, '2018*', '*.nc')
-    
-nldas_files = sorted(glob.glob(nldas_pattern))
+nldas_files = sorted(glob.glob(os.path.join(NLDAS_DIR, '*', '*.nc')))
 print(f"Found {len(nldas_files)} NLDAS files to process.")
 
 # ==========================================
-# 3. VECTORIZED EXTRACTION LOOP
-# ==========================================
-print("Starting extraction...")
-
-# Initialize CSV with headers
-pd.DataFrame(columns=['Station', 'datetime', 'Tair', 'Qair', 'PSurf']).to_csv(OUTPUT_CSV, index=False)
-
-buffer = []
-chunk_size = 100  # Write to disk every 500 files to save RAM
-
-import IPython
-import tqdm
-times_list = []
-tair_list = []
-qair_list = []
-psurf_list = []
-
-import numpy as np
-stn_names = df_meta['Station'].values
-
-# ==========================================
-# 1. PRE-COMPUTE GRID INDICES (THE MASSIVE SPEEDUP)
+# 3. PRE-COMPUTE GRID INDICES (THE MASSIVE SPEEDUP)
 # ==========================================
 print("Pre-computing nearest grid indices...")
-nldas_files = sorted(glob.glob(os.path.join(NLDAS_DIR, '*', '*.nc')))
-
-# Open just the first file to get the grid coordinates
 with xr.open_dataset(nldas_files[0], engine='netcdf4') as ds_ref:
     lat_var = 'lat' if 'lat' in ds_ref.coords else 'latitude'
     lon_var = 'lon' if 'lon' in ds_ref.coords else 'longitude'
@@ -104,87 +257,56 @@ with xr.open_dataset(nldas_files[0], engine='netcdf4') as ds_ref:
 lat_idxs = [np.abs(grid_lats - stn_lat).argmin() for stn_lat in df_meta['lat']]
 lon_idxs = [np.abs(grid_lons - stn_lon).argmin() for stn_lon in df_meta['lon']]
 
-# Convert to xarray DataArrays for fast vectorized integer indexing
-ilat_da = xr.DataArray(lat_idxs, dims='Station')
-ilon_da = xr.DataArray(lon_idxs, dims='Station')
-
 # ==========================================
-# 2. INITIALIZE NESTED DICTIONARY
+# 4. INITIALIZE NESTED DICTIONARY
 # ==========================================
-# Structure: { "Station_1": {}, "Station_2": {} }
 extracted_data = {stn: {} for stn in stn_names}
 
-'''
-Every file f is a day with 24 hours
-'''
-for i, f in tqdm.tqdm(enumerate(nldas_files)):
+# ==========================================
+# 5. PURE NETCDF4 EXTRACTION LOOP
+# ==========================================
+print("Starting lightning-fast extraction...")
+
+# Only ONE tqdm bar for the files (no inner tqdm)
+for f in tqdm(nldas_files, desc="Processing Files"):
     try:
-        with xr.open_dataset(f, engine='netcdf4') as ds:
-            lat_var = 'lat' if 'lat' in ds.coords else 'latitude'
-            lon_var = 'lon' if 'lon' in ds.coords else 'longitude'
-            time_var = 'time' if 'time' in ds.coords else 'valid_time' 
-
-            # --- THE MAGIC FORMULA ---
-            # This extracts all stations at once using nearest neighbor
-            ds_pts = ds.sel({lat_var: lats_da, lon_var: lons_da}, method='nearest')
-            
-            # Attach the actual station names as a coordinate
-            ds_pts = ds_pts.assign_coords(Station=stns_da)
-            
-            # Convert to pandas dataframe
-            basename = os.path.basename(f)
-            date_str = basename.split('.')[1][1:]  
-            yearmonth = date_str[:6]               
-            day = date_str   
-            import netCDF4 as nc
-            with nc.Dataset(f, 'r') as root:
-                tair_var = root.variables[NLDAS_TMP]
-                qair_var = root.variables[NLDAS_SPFH]
-                psurf_var = root.variables[NLDAS_PSURF]
-                IPython.embed()
-                import tqdm 
-                for stn_name, y_idx, x_idx in tqdm.tqdm(zip(stn_names, lat_idxs, lon_idxs)):
-                    stn_tair = tair_var[:, y_idx, x_idx].filled(np.nan)
-                    stn_qair = qair_var[:, y_idx, x_idx].filled(np.nan)
-                    stn_psurf = psurf_var[:, y_idx, x_idx].filled(np.nan)
-                    
-                    if yearmonth not in extracted_data[stn_name]:
-                        extracted_data[stn_name][yearmonth] = {}
-                        
-                    extracted_data[stn_name][yearmonth][day] = {
-                        'tair': stn_tair.tolist(),
-                        'qair': stn_qair.tolist(),
-                        'psurf': stn_psurf.tolist()
-                    }
-                    #print(stn_name)
-                print(f)
-            # times_list.append(ds_pts[time_var].values)
-            # tair_list.append(ds_pts[NLDAS_TMP].values)
-            # qair_list.append(ds_pts[NLDAS_SPFH].values)
-            # psurf_list.append(ds_pts[NLDAS_PSURF].values)
-            
-            # ## need to switch this to numpy array with lat/ long too 
-            # #df_pt = ds_pts[[NLDAS_TMP, NLDAS_SPFH, NLDAS_PSURF]].to_dataframe().reset_index()
-            
-            # # Clean up columns (rename 'time' to 'datetime')
-            # time_var = 'time' if 'time' in df_pt.columns else 'valid_time'
-            # df_pt = df_pt.rename(columns={time_var: 'datetime'})
-            
-            # # Keep only what we need
-            # df_pt = df_pt[['Station', 'datetime', NLDAS_TMP, NLDAS_SPFH, NLDAS_PSURF]]
-            
-            buffer.append(df_pt)
-            print(f)
-            
-    except Exception as e:
-        print(f"Error reading {f}: {e}")
+        basename = os.path.basename(f)
+        date_str = basename.split('.')[1][1:]  
+        yearmonth = date_str[:6]               
+        day = date_str   
         
-    # Write to disk in chunks to prevent memory overload
-    if (i + 1) % chunk_size == 0 or (i + 1) == len(nldas_files):
-        if buffer:
-            chunk_df = pd.concat(buffer, ignore_index=True)
-            chunk_df.to_csv(OUTPUT_CSV, mode='a', header=False, index=False)
-            buffer = [] # clear memory
-        print(f"Processed {i + 1}/{len(nldas_files)} files...")
+        # Open using pure NetCDF4 (Xarray is fully banished from this loop)
+        with nc.Dataset(f, 'r') as root:
+            tair_var = root.variables[NLDAS_TMP]
+            qair_var = root.variables[NLDAS_SPFH]
+            psurf_var = root.variables[NLDAS_PSURF]
+            
+            # Fast inner loop using our pre-calculated integers
+            for stn_name, y_idx, x_idx in zip(stn_names, lat_idxs, lon_idxs):
+                
+                # Instantly jump to the exact pixel on disk
+                stn_tair = tair_var[:, y_idx, x_idx].filled(np.nan)
+                stn_qair = qair_var[:, y_idx, x_idx].filled(np.nan)
+                stn_psurf = psurf_var[:, y_idx, x_idx].filled(np.nan)
+                
+                # Append to dictionary
+                if yearmonth not in extracted_data[stn_name]:
+                    extracted_data[stn_name][yearmonth] = {}
+                    
+                extracted_data[stn_name][yearmonth][day] = {
+                    'tair': stn_tair.tolist(),
+                    'qair': stn_qair.tolist(),
+                    'psurf': stn_psurf.tolist()
+                }
+                
+    except Exception as e:
+        print(f"\nError reading {f}: {e}")
 
-print(f"\nExtraction complete! Saved to {OUTPUT_CSV}")
+# ==========================================
+# 6. SAVE TO JSON
+# ==========================================
+print("\nSaving to JSON...")
+with open(OUTPUT_JSON, 'w') as jf:
+    json.dump(extracted_data, jf)
+
+print(f"Extraction complete! Saved to {OUTPUT_JSON}")
