@@ -24,7 +24,7 @@ OUTPUT_CSV = './nldas_station_reports_sequential/ALL_STATIONS_NLDAS_EXTRACTED.cs
 
 NLDAS_TMP = 'Tair'      
 NLDAS_SPFH = 'Qair'    
-NLDAS_PSURF = 'Psurf'    
+NLDAS_PSURF = 'PSurf'    
 
 os.makedirs(os.path.dirname(OUTPUT_CSV), exist_ok=True)
 
@@ -71,7 +71,7 @@ print(f"Found {len(nldas_files)} NLDAS files to process.")
 print("Starting extraction...")
 
 # Initialize CSV with headers
-pd.DataFrame(columns=['Station', 'datetime', 'Tair', 'Qair', 'Psurf']).to_csv(OUTPUT_CSV, index=False)
+pd.DataFrame(columns=['Station', 'datetime', 'Tair', 'Qair', 'PSurf']).to_csv(OUTPUT_CSV, index=False)
 
 buffer = []
 chunk_size = 100  # Write to disk every 500 files to save RAM
@@ -92,7 +92,7 @@ for i, f in tqdm.tqdm(enumerate(nldas_files)):
             ds_pts = ds_pts.assign_coords(Station=stns_da)
             
             # Convert to pandas dataframe
-            IPython.embed()
+            #IPython.embed()
             df_pt = ds_pts[[NLDAS_TMP, NLDAS_SPFH, NLDAS_PSURF]].to_dataframe().reset_index()
             
             # Clean up columns (rename 'time' to 'datetime')
@@ -103,7 +103,7 @@ for i, f in tqdm.tqdm(enumerate(nldas_files)):
             df_pt = df_pt[['Station', 'datetime', NLDAS_TMP, NLDAS_SPFH, NLDAS_PSURF]]
             
             buffer.append(df_pt)
-            print(f)
+            #print(f)
             
     except Exception as e:
         print(f"Error reading {f}: {e}")
