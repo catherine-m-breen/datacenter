@@ -211,7 +211,7 @@ OUTPUT_JSON = './nldas_station_reports_sequential/ALL_STATIONS_NLDAS.json'
 
 NLDAS_TMP = 'Tair'      
 NLDAS_SPFH = 'Qair'    
-NLDAS_PSURF = 'Psurf' # Fixed case, usually Psurf in NLDAS
+NLDAS_PSURF = 'PSurf' # Fixed case, usually Psurf in NLDAS
 
 os.makedirs(os.path.dirname(OUTPUT_JSON), exist_ok=True)
 
