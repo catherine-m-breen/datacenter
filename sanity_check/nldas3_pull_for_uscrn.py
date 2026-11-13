@@ -1,3 +1,10 @@
+'''
+This code does a point extraction on all the uscrn stations simulatneously for all nldas3 data and then we will do all the bias analysis etc afterwards. 
+This will hopefully minimize everything so that it just runs once 
+
+
+'''
+
 import os
 import glob
 import pandas as pd
@@ -17,6 +24,7 @@ OUTPUT_CSV = './nldas_station_reports_sequential/ALL_STATIONS_NLDAS_EXTRACTED.cs
 
 NLDAS_TMP = 'Tair'      
 NLDAS_SPFH = 'Qair'    
+NLDAS_PSURF = 'Psurf'    
 
 os.makedirs(os.path.dirname(OUTPUT_CSV), exist_ok=True)
 
@@ -63,10 +71,10 @@ print(f"Found {len(nldas_files)} NLDAS files to process.")
 print("Starting extraction...")
 
 # Initialize CSV with headers
-pd.DataFrame(columns=['Station', 'datetime', 'Tair', 'Qair']).to_csv(OUTPUT_CSV, index=False)
+pd.DataFrame(columns=['Station', 'datetime', 'Tair', 'Qair', 'Psurf']).to_csv(OUTPUT_CSV, index=False)
 
 buffer = []
-chunk_size = 500  # Write to disk every 500 files to save RAM
+chunk_size = 100  # Write to disk every 500 files to save RAM
 
 for i, f in enumerate(nldas_files):
     try:
@@ -82,16 +90,17 @@ for i, f in enumerate(nldas_files):
             ds_pts = ds_pts.assign_coords(Station=stns_da)
             
             # Convert to pandas dataframe
-            df_pt = ds_pts[[NLDAS_TMP, NLDAS_SPFH]].to_dataframe().reset_index()
+            df_pt = ds_pts[[NLDAS_TMP, NLDAS_SPFH, NLDAS_PSURF]].to_dataframe().reset_index()
             
             # Clean up columns (rename 'time' to 'datetime')
             time_var = 'time' if 'time' in df_pt.columns else 'valid_time'
             df_pt = df_pt.rename(columns={time_var: 'datetime'})
             
             # Keep only what we need
-            df_pt = df_pt[['Station', 'datetime', NLDAS_TMP, NLDAS_SPFH]]
+            df_pt = df_pt[['Station', 'datetime', NLDAS_TMP, NLDAS_SPFH, NLDAS_PSURF]]
             
             buffer.append(df_pt)
+            print(f)
             
     except Exception as e:
         print(f"Error reading {f}: {e}")
