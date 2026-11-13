@@ -142,7 +142,8 @@ for i, f in tqdm.tqdm(enumerate(nldas_files)):
                 qair_var = root.variables[NLDAS_SPFH]
                 psurf_var = root.variables[NLDAS_PSURF]
                 IPython.embed()
-                for stn_name, y_idx, x_idx in zip(stn_names, lat_idxs, lon_idxs):
+                import tqdm 
+                for stn_name, y_idx, x_idx in tqdm.tqdm(zip(stn_names, lat_idxs, lon_idxs)):
                     stn_tair = tair_var[:, y_idx, x_idx].filled(np.nan)
                     stn_qair = qair_var[:, y_idx, x_idx].filled(np.nan)
                     stn_psurf = psurf_var[:, y_idx, x_idx].filled(np.nan)
@@ -155,6 +156,8 @@ for i, f in tqdm.tqdm(enumerate(nldas_files)):
                         'qair': stn_qair.tolist(),
                         'psurf': stn_psurf.tolist()
                     }
+                    #print(stn_name)
+                print(f)
             # times_list.append(ds_pts[time_var].values)
             # tair_list.append(ds_pts[NLDAS_TMP].values)
             # qair_list.append(ds_pts[NLDAS_SPFH].values)
