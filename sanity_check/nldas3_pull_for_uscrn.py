@@ -325,7 +325,138 @@ this was still 1 min per day for all stations
 
 '''
 Try 3
+supposed to limit thrashing... but did not work
 '''
+
+# import os
+# import glob
+# import json
+# import numpy as np
+# import pandas as pd
+# import xarray as xr
+# import netCDF4 as nc
+# import warnings
+# from tqdm import tqdm
+
+# warnings.filterwarnings('ignore')
+
+# # ==========================================
+# # CONFIGURATION
+# # ==========================================
+# NLDAS_DIR = '/discover/nobackup/projects/eis_nldas3/DATA/forcing/hourly'
+# STATION_DIR = '/discover/nobackup/cmbreen/datacenters/uscrn_independent_data'
+# OUTPUT_JSON = './nldas_station_reports_sequential/ALL_STATIONS_NLDAS.json'
+
+# NLDAS_TMP = 'Tair'      
+# NLDAS_SPFH = 'Qair'    
+# NLDAS_PSURF = 'PSurf'
+
+# os.makedirs(os.path.dirname(OUTPUT_JSON), exist_ok=True)
+
+# # ==========================================
+# # 1. GATHER ALL STATION COORDINATES
+# # ==========================================
+# print("Gathering station coordinates...")
+# station_files = [f for f in glob.glob(os.path.join(STATION_DIR, '*.csv')) if not os.path.basename(f).startswith('all_')]
+
+# station_meta = []
+# for stn_file in station_files:
+#     stn_name = os.path.basename(stn_file).replace('.csv', '')
+#     df_temp = pd.read_csv(stn_file, nrows=1)
+#     if 'latitude' in df_temp.columns and 'longitude' in df_temp.columns:
+#         station_meta.append({
+#             'Station': stn_name,
+#             'lat': df_temp['latitude'].iloc[0],
+#             'lon': df_temp['longitude'].iloc[0]
+#         })
+
+# df_meta = pd.DataFrame(station_meta)
+# stn_names = df_meta['Station'].values
+# print(f"Found {len(df_meta)} valid stations.")
+
+# nldas_files = sorted(glob.glob(os.path.join(NLDAS_DIR, '*', '*.nc')))
+# print(f"Found {len(nldas_files)} NLDAS files to process.")
+
+# # ==========================================
+# # 2. PRE-COMPUTE GRID INDICES
+# # ==========================================
+# print("Pre-computing nearest grid indices...")
+# with xr.open_dataset(nldas_files[0], engine='netcdf4') as ds_ref:
+#     lat_var = 'lat' if 'lat' in ds_ref.coords else 'latitude'
+#     lon_var = 'lon' if 'lon' in ds_ref.coords else 'longitude'
+    
+#     grid_lats = ds_ref[lat_var].values
+#     grid_lons = ds_ref[lon_var].values
+
+# lat_idxs = [np.abs(grid_lats - stn_lat).argmin() for stn_lat in df_meta['lat']]
+# lon_idxs = [np.abs(grid_lons - stn_lon).argmin() for stn_lon in df_meta['lon']]
+
+# # --- THE MAGIC RAM BLOCK MAPPING ---
+# # Find the unique rows (Y-indices) so we can pull contiguous blocks
+# unique_y_list = sorted(list(set(lat_idxs)))
+
+# # Create a dictionary to map the "Global" Y coordinate to our new "Local" RAM subset
+# y_lookup = {global_y: local_y for local_y, global_y in enumerate(unique_y_list)}
+
+# extracted_data = {stn: {} for stn in stn_names}
+
+# # ==========================================
+# # 3. EXTRACTION LOOP (THE RAM BLOCK METHOD)
+# # ==========================================
+# print("Starting RAM Block extraction...")
+
+# for f in tqdm(nldas_files, desc="Processing Files"):
+#     try:
+#         basename = os.path.basename(f)
+#         date_str = basename.split('.')[1][1:]  
+#         yearmonth = date_str[:6]               
+#         day = date_str   
+        
+#         with nc.Dataset(f, 'r') as root:
+#             # --- HUGE SPEEDUP HERE ---
+#             # We index using `unique_y_list`. This tells NetCDF4 to grab all 24 hours 
+#             # and all longitudes, but ONLY for the ~160 specific rows we care about. 
+#             # This turns 11,500 tiny disk reads into exactly 3 fast block reads!
+#             tair_block = root.variables[NLDAS_TMP][:, unique_y_list, :].filled(np.nan)
+#             qair_block = root.variables[NLDAS_SPFH][:, unique_y_list, :].filled(np.nan)
+#             psurf_block = root.variables[NLDAS_PSURF][:, unique_y_list, :].filled(np.nan)
+            
+#             # Now we loop through the stations and pull data from RAM instantly
+#             for stn_name, y_idx, x_idx in zip(stn_names, lat_idxs, lon_idxs):
+                
+#                 # Convert the global Y to the local Y of our RAM block
+#                 local_y = y_lookup[y_idx]
+                
+#                 # Instantly slice from the NumPy array in RAM
+#                 stn_tair = tair_block[:, local_y, x_idx]
+#                 stn_qair = qair_block[:, local_y, x_idx]
+#                 stn_psurf = psurf_block[:, local_y, x_idx]
+                
+#                 if yearmonth not in extracted_data[stn_name]:
+#                     extracted_data[stn_name][yearmonth] = {}
+                    
+#                 extracted_data[stn_name][yearmonth][day] = {
+#                     'tair': stn_tair.tolist(),
+#                     'qair': stn_qair.tolist(),
+#                     'psurf': stn_psurf.tolist()
+#                 }
+                
+#     except Exception as e:
+#         print(f"\nError reading {f}: {e}")
+
+# # ==========================================
+# # 4. SAVE TO JSON
+# # ==========================================
+# print("\nSaving to JSON...")
+# with open(OUTPUT_JSON, 'w') as jf:
+#     json.dump(extracted_data, jf)
+
+# print(f"Extraction complete! Saved to {OUTPUT_JSON}")
+
+'''
+try 4, like 2 but with multiprocessing
+'''
+
 
 import os
 import glob
@@ -336,6 +467,7 @@ import xarray as xr
 import netCDF4 as nc
 import warnings
 from tqdm import tqdm
+from multiprocessing import Pool, cpu_count
 
 warnings.filterwarnings('ignore')
 
@@ -348,9 +480,13 @@ OUTPUT_JSON = './nldas_station_reports_sequential/ALL_STATIONS_NLDAS.json'
 
 NLDAS_TMP = 'Tair'      
 NLDAS_SPFH = 'Qair'    
-NLDAS_PSURF = 'PSurf'
+NLDAS_PSURF = 'PSurf' 
 
 os.makedirs(os.path.dirname(OUTPUT_JSON), exist_ok=True)
+
+# Define how many CPU cores to use. 
+# Leaves 2 cores free so the node doesn't freeze.
+NUM_WORKERS = max(1, cpu_count() - 2)
 
 # ==========================================
 # 1. GATHER ALL STATION COORDINATES
@@ -370,14 +506,18 @@ for stn_file in station_files:
         })
 
 df_meta = pd.DataFrame(station_meta)
+# These must be globally accessible for the worker processes
 stn_names = df_meta['Station'].values
 print(f"Found {len(df_meta)} valid stations.")
 
+# ==========================================
+# 2. FIND NLDAS FILES
+# ==========================================
 nldas_files = sorted(glob.glob(os.path.join(NLDAS_DIR, '*', '*.nc')))
 print(f"Found {len(nldas_files)} NLDAS files to process.")
 
 # ==========================================
-# 2. PRE-COMPUTE GRID INDICES
+# 3. PRE-COMPUTE GRID INDICES (THE MASSIVE SPEEDUP)
 # ==========================================
 print("Pre-computing nearest grid indices...")
 with xr.open_dataset(nldas_files[0], engine='netcdf4') as ds_ref:
@@ -390,64 +530,78 @@ with xr.open_dataset(nldas_files[0], engine='netcdf4') as ds_ref:
 lat_idxs = [np.abs(grid_lats - stn_lat).argmin() for stn_lat in df_meta['lat']]
 lon_idxs = [np.abs(grid_lons - stn_lon).argmin() for stn_lon in df_meta['lon']]
 
-# --- THE MAGIC RAM BLOCK MAPPING ---
-# Find the unique rows (Y-indices) so we can pull contiguous blocks
-unique_y_list = sorted(list(set(lat_idxs)))
-
-# Create a dictionary to map the "Global" Y coordinate to our new "Local" RAM subset
-y_lookup = {global_y: local_y for local_y, global_y in enumerate(unique_y_list)}
-
-extracted_data = {stn: {} for stn in stn_names}
-
 # ==========================================
-# 3. EXTRACTION LOOP (THE RAM BLOCK METHOD)
+# 4. THE PARALLEL WORKER FUNCTION
 # ==========================================
-print("Starting RAM Block extraction...")
-
-for f in tqdm(nldas_files, desc="Processing Files"):
+def process_single_file(f):
+    """
+    This function runs on a separate CPU core.
+    It reads ONE file and returns the data for all stations for that day.
+    """
     try:
         basename = os.path.basename(f)
         date_str = basename.split('.')[1][1:]  
         yearmonth = date_str[:6]               
         day = date_str   
         
+        # This dictionary will hold just this file's data to send back to the main process
+        day_results = {}
+        
         with nc.Dataset(f, 'r') as root:
-            # --- HUGE SPEEDUP HERE ---
-            # We index using `unique_y_list`. This tells NetCDF4 to grab all 24 hours 
-            # and all longitudes, but ONLY for the ~160 specific rows we care about. 
-            # This turns 11,500 tiny disk reads into exactly 3 fast block reads!
-            tair_block = root.variables[NLDAS_TMP][:, unique_y_list, :].filled(np.nan)
-            qair_block = root.variables[NLDAS_SPFH][:, unique_y_list, :].filled(np.nan)
-            psurf_block = root.variables[NLDAS_PSURF][:, unique_y_list, :].filled(np.nan)
+            tair_var = root.variables[NLDAS_TMP]
+            qair_var = root.variables[NLDAS_SPFH]
+            psurf_var = root.variables[NLDAS_PSURF]
             
-            # Now we loop through the stations and pull data from RAM instantly
             for stn_name, y_idx, x_idx in zip(stn_names, lat_idxs, lon_idxs):
+                stn_tair = tair_var[:, y_idx, x_idx].filled(np.nan)
+                stn_qair = qair_var[:, y_idx, x_idx].filled(np.nan)
+                stn_psurf = psurf_var[:, y_idx, x_idx].filled(np.nan)
                 
-                # Convert the global Y to the local Y of our RAM block
-                local_y = y_lookup[y_idx]
-                
-                # Instantly slice from the NumPy array in RAM
-                stn_tair = tair_block[:, local_y, x_idx]
-                stn_qair = qair_block[:, local_y, x_idx]
-                stn_psurf = psurf_block[:, local_y, x_idx]
-                
-                if yearmonth not in extracted_data[stn_name]:
-                    extracted_data[stn_name][yearmonth] = {}
-                    
-                extracted_data[stn_name][yearmonth][day] = {
+                day_results[stn_name] = {
                     'tair': stn_tair.tolist(),
                     'qair': stn_qair.tolist(),
                     'psurf': stn_psurf.tolist()
                 }
                 
+        return yearmonth, day, day_results, None
+        
     except Exception as e:
-        print(f"\nError reading {f}: {e}")
+        return None, None, None, f"Error reading {f}: {e}"
 
 # ==========================================
-# 4. SAVE TO JSON
+# 5. EXECUTE PARALLEL EXTRACTION
 # ==========================================
-print("\nSaving to JSON...")
-with open(OUTPUT_JSON, 'w') as jf:
-    json.dump(extracted_data, jf)
+# The __name__ == '__main__' block is REQUIRED for multiprocessing to work safely
+if __name__ == '__main__':
+    print(f"Starting lightning-fast PARALLEL extraction on {NUM_WORKERS} cores...")
+    
+    extracted_data = {stn: {} for stn in stn_names}
+    
+    # Launch the pool of CPU workers
+    with Pool(processes=NUM_WORKERS) as pool:
+        
+        # imap_unordered streams results back as soon as ANY file finishes
+        iterator = pool.imap_unordered(process_single_file, nldas_files)
+        
+        # Wrap the iterator in tqdm for a single, clean progress bar
+        for yearmonth, day, day_results, error_msg in tqdm(iterator, total=len(nldas_files), desc="Processing Files"):
+            
+            if error_msg:
+                print(f"\n{error_msg}")
+                continue
+                
+            # Merge the results from the worker core into our master dictionary
+            for stn in stn_names:
+                if yearmonth not in extracted_data[stn]:
+                    extracted_data[stn][yearmonth] = {}
+                    
+                extracted_data[stn][yearmonth][day] = day_results[stn]
 
-print(f"Extraction complete! Saved to {OUTPUT_JSON}")
+    # ==========================================
+    # 6. SAVE TO JSON
+    # ==========================================
+    print("\nSaving to JSON...")
+    with open(OUTPUT_JSON, 'w') as jf:
+        json.dump(extracted_data, jf)
+
+    print(f"Extraction complete! Saved to {OUTPUT_JSON}")
