@@ -83,6 +83,40 @@ tair_list = []
 qair_list = []
 psurf_list = []
 
+import numpy as np
+stn_names = df_meta['Station'].values
+
+# ==========================================
+# 1. PRE-COMPUTE GRID INDICES (THE MASSIVE SPEEDUP)
+# ==========================================
+print("Pre-computing nearest grid indices...")
+nldas_files = sorted(glob.glob(os.path.join(NLDAS_DIR, '*', '*.nc')))
+
+# Open just the first file to get the grid coordinates
+with xr.open_dataset(nldas_files[0], engine='netcdf4') as ds_ref:
+    lat_var = 'lat' if 'lat' in ds_ref.coords else 'latitude'
+    lon_var = 'lon' if 'lon' in ds_ref.coords else 'longitude'
+    
+    grid_lats = ds_ref[lat_var].values
+    grid_lons = ds_ref[lon_var].values
+
+# Find the exact integer index for each station ONCE
+lat_idxs = [np.abs(grid_lats - stn_lat).argmin() for stn_lat in df_meta['lat']]
+lon_idxs = [np.abs(grid_lons - stn_lon).argmin() for stn_lon in df_meta['lon']]
+
+# Convert to xarray DataArrays for fast vectorized integer indexing
+ilat_da = xr.DataArray(lat_idxs, dims='Station')
+ilon_da = xr.DataArray(lon_idxs, dims='Station')
+
+# ==========================================
+# 2. INITIALIZE NESTED DICTIONARY
+# ==========================================
+# Structure: { "Station_1": {}, "Station_2": {} }
+extracted_data = {stn: {} for stn in stn_names}
+
+'''
+Every file f is a day with 24 hours
+'''
 for i, f in tqdm.tqdm(enumerate(nldas_files)):
     try:
         with xr.open_dataset(f, engine='netcdf4') as ds:
@@ -98,22 +132,43 @@ for i, f in tqdm.tqdm(enumerate(nldas_files)):
             ds_pts = ds_pts.assign_coords(Station=stns_da)
             
             # Convert to pandas dataframe
-            IPython.embed()
-
-            times_list.append(ds_pts[time_var].values)
-            tair_list.append(ds_pts[NLDAS_TMP].values)
-            qair_list.append(ds_pts[NLDAS_SPFH].values)
-            psurf_list.append(ds_pts[NLDAS_PSURF].values)
+            basename = os.path.basename(f)
+            date_str = basename.split('.')[1][1:]  
+            yearmonth = date_str[:6]               
+            day = date_str   
+            import netCDF4 as nc
+            with nc.Dataset(f, 'r') as root:
+                tair_var = root.variables[NLDAS_TMP]
+                qair_var = root.variables[NLDAS_SPFH]
+                psurf_var = root.variables[NLDAS_PSURF]
+                IPython.embed()
+                for stn_name, y_idx, x_idx in zip(stn_names, lat_idxs, lon_idxs):
+                    stn_tair = tair_var[:, y_idx, x_idx].filled(np.nan)
+                    stn_qair = qair_var[:, y_idx, x_idx].filled(np.nan)
+                    stn_psurf = psurf_var[:, y_idx, x_idx].filled(np.nan)
+                    
+                    if yearmonth not in extracted_data[stn_name]:
+                        extracted_data[stn_name][yearmonth] = {}
+                        
+                    extracted_data[stn_name][yearmonth][day] = {
+                        'tair': stn_tair.tolist(),
+                        'qair': stn_qair.tolist(),
+                        'psurf': stn_psurf.tolist()
+                    }
+            # times_list.append(ds_pts[time_var].values)
+            # tair_list.append(ds_pts[NLDAS_TMP].values)
+            # qair_list.append(ds_pts[NLDAS_SPFH].values)
+            # psurf_list.append(ds_pts[NLDAS_PSURF].values)
             
-            ## need to switch this to numpy array with lat/ long too 
-            #df_pt = ds_pts[[NLDAS_TMP, NLDAS_SPFH, NLDAS_PSURF]].to_dataframe().reset_index()
+            # ## need to switch this to numpy array with lat/ long too 
+            # #df_pt = ds_pts[[NLDAS_TMP, NLDAS_SPFH, NLDAS_PSURF]].to_dataframe().reset_index()
             
-            # Clean up columns (rename 'time' to 'datetime')
-            time_var = 'time' if 'time' in df_pt.columns else 'valid_time'
-            df_pt = df_pt.rename(columns={time_var: 'datetime'})
+            # # Clean up columns (rename 'time' to 'datetime')
+            # time_var = 'time' if 'time' in df_pt.columns else 'valid_time'
+            # df_pt = df_pt.rename(columns={time_var: 'datetime'})
             
-            # Keep only what we need
-            df_pt = df_pt[['Station', 'datetime', NLDAS_TMP, NLDAS_SPFH, NLDAS_PSURF]]
+            # # Keep only what we need
+            # df_pt = df_pt[['Station', 'datetime', NLDAS_TMP, NLDAS_SPFH, NLDAS_PSURF]]
             
             buffer.append(df_pt)
             print(f)
