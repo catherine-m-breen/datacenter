@@ -76,7 +76,8 @@ pd.DataFrame(columns=['Station', 'datetime', 'Tair', 'Qair', 'Psurf']).to_csv(OU
 buffer = []
 chunk_size = 100  # Write to disk every 500 files to save RAM
 
-for i, f in enumerate(nldas_files):
+import tqdm
+for i, f in tqdm.tqdm(enumerate(nldas_files)):
     try:
         with xr.open_dataset(f, engine='netcdf4') as ds:
             lat_var = 'lat' if 'lat' in ds.coords else 'latitude'
