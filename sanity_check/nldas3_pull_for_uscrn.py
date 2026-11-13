@@ -92,7 +92,7 @@ for i, f in tqdm.tqdm(enumerate(nldas_files)):
             ds_pts = ds_pts.assign_coords(Station=stns_da)
             
             # Convert to pandas dataframe
-            #IPython.embed()
+            IPython.embed()
             df_pt = ds_pts[[NLDAS_TMP, NLDAS_SPFH, NLDAS_PSURF]].to_dataframe().reset_index()
             
             # Clean up columns (rename 'time' to 'datetime')
