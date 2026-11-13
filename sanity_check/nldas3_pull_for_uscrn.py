@@ -103,7 +103,7 @@ for i, f in tqdm.tqdm(enumerate(nldas_files)):
             df_pt = df_pt[['Station', 'datetime', NLDAS_TMP, NLDAS_SPFH, NLDAS_PSURF]]
             
             buffer.append(df_pt)
-            #print(f)
+            print(f)
             
     except Exception as e:
         print(f"Error reading {f}: {e}")
