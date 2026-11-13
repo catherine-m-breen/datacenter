@@ -458,6 +458,161 @@ try 4, like 2 but with multiprocessing
 '''
 
 
+# import os
+# import glob
+# import json
+# import numpy as np
+# import pandas as pd
+# import xarray as xr
+# import netCDF4 as nc
+# import warnings
+# from tqdm import tqdm
+# from multiprocessing import Pool, cpu_count
+
+# warnings.filterwarnings('ignore')
+
+# # ==========================================
+# # CONFIGURATION
+# # ==========================================
+# NLDAS_DIR = '/discover/nobackup/projects/eis_nldas3/DATA/forcing/hourly'
+# STATION_DIR = '/discover/nobackup/cmbreen/datacenters/uscrn_independent_data'
+# OUTPUT_JSON = './nldas_station_reports_sequential/ALL_STATIONS_NLDAS.json'
+
+# NLDAS_TMP = 'Tair'      
+# NLDAS_SPFH = 'Qair'    
+# NLDAS_PSURF = 'PSurf' 
+
+# os.makedirs(os.path.dirname(OUTPUT_JSON), exist_ok=True)
+
+# # Define how many CPU cores to use. 
+# # Leaves 2 cores free so the node doesn't freeze.
+# NUM_WORKERS = max(1, cpu_count() - 2)
+
+# # ==========================================
+# # 1. GATHER ALL STATION COORDINATES
+# # ==========================================
+# print("Gathering station coordinates...")
+# station_files = [f for f in glob.glob(os.path.join(STATION_DIR, '*.csv')) if not os.path.basename(f).startswith('all_')]
+
+# station_meta = []
+# for stn_file in station_files:
+#     stn_name = os.path.basename(stn_file).replace('.csv', '')
+#     df_temp = pd.read_csv(stn_file, nrows=1)
+#     if 'latitude' in df_temp.columns and 'longitude' in df_temp.columns:
+#         station_meta.append({
+#             'Station': stn_name,
+#             'lat': df_temp['latitude'].iloc[0],
+#             'lon': df_temp['longitude'].iloc[0]
+#         })
+
+# df_meta = pd.DataFrame(station_meta)
+# # These must be globally accessible for the worker processes
+# stn_names = df_meta['Station'].values
+# print(f"Found {len(df_meta)} valid stations.")
+
+# # ==========================================
+# # 2. FIND NLDAS FILES
+# # ==========================================
+# nldas_files = sorted(glob.glob(os.path.join(NLDAS_DIR, '*', '*.nc')))
+# print(f"Found {len(nldas_files)} NLDAS files to process.")
+
+# # ==========================================
+# # 3. PRE-COMPUTE GRID INDICES (THE MASSIVE SPEEDUP)
+# # ==========================================
+# print("Pre-computing nearest grid indices...")
+# with xr.open_dataset(nldas_files[0], engine='netcdf4') as ds_ref:
+#     lat_var = 'lat' if 'lat' in ds_ref.coords else 'latitude'
+#     lon_var = 'lon' if 'lon' in ds_ref.coords else 'longitude'
+    
+#     grid_lats = ds_ref[lat_var].values
+#     grid_lons = ds_ref[lon_var].values
+
+# lat_idxs = [np.abs(grid_lats - stn_lat).argmin() for stn_lat in df_meta['lat']]
+# lon_idxs = [np.abs(grid_lons - stn_lon).argmin() for stn_lon in df_meta['lon']]
+
+# # ==========================================
+# # 4. THE PARALLEL WORKER FUNCTION
+# # ==========================================
+# def process_single_file(f):
+#     """
+#     This function runs on a separate CPU core.
+#     It reads ONE file and returns the data for all stations for that day.
+#     """
+#     try:
+#         basename = os.path.basename(f)
+#         date_str = basename.split('.')[1][1:]  
+#         yearmonth = date_str[:6]               
+#         day = date_str   
+        
+#         # This dictionary will hold just this file's data to send back to the main process
+#         day_results = {}
+        
+#         with nc.Dataset(f, 'r') as root:
+#             tair_var = root.variables[NLDAS_TMP]
+#             qair_var = root.variables[NLDAS_SPFH]
+#             psurf_var = root.variables[NLDAS_PSURF]
+            
+#             for stn_name, y_idx, x_idx in zip(stn_names, lat_idxs, lon_idxs):
+#                 stn_tair = tair_var[:, y_idx, x_idx].filled(np.nan)
+#                 stn_qair = qair_var[:, y_idx, x_idx].filled(np.nan)
+#                 stn_psurf = psurf_var[:, y_idx, x_idx].filled(np.nan)
+                
+#                 day_results[stn_name] = {
+#                     'tair': stn_tair.tolist(),
+#                     'qair': stn_qair.tolist(),
+#                     'psurf': stn_psurf.tolist()
+#                 }
+                
+#         return yearmonth, day, day_results, None
+        
+#     except Exception as e:
+#         return None, None, None, f"Error reading {f}: {e}"
+
+# # ==========================================
+# # 5. EXECUTE PARALLEL EXTRACTION
+# # ==========================================
+# # The __name__ == '__main__' block is REQUIRED for multiprocessing to work safely
+# if __name__ == '__main__':
+#     print(f"Starting lightning-fast PARALLEL extraction on {NUM_WORKERS} cores...")
+    
+#     extracted_data = {stn: {} for stn in stn_names}
+    
+#     # Launch the pool of CPU workers
+#     with Pool(processes=NUM_WORKERS) as pool:
+        
+#         # imap_unordered streams results back as soon as ANY file finishes
+#         iterator = pool.imap_unordered(process_single_file, nldas_files)
+        
+#         # Wrap the iterator in tqdm for a single, clean progress bar
+#         for yearmonth, day, day_results, error_msg in tqdm(iterator, total=len(nldas_files), desc="Processing Files"):
+            
+#             if error_msg:
+#                 print(f"\n{error_msg}")
+#                 continue
+                
+#             # Merge the results from the worker core into our master dictionary
+#             for stn in stn_names:
+#                 if yearmonth not in extracted_data[stn]:
+#                     extracted_data[stn][yearmonth] = {}
+                    
+#                 extracted_data[stn][yearmonth][day] = day_results[stn]
+
+#     # ==========================================
+#     # 6. SAVE TO JSON
+#     # ==========================================
+#     print("\nSaving to JSON...")
+#     with open(OUTPUT_JSON, 'w') as jf:
+#         json.dump(extracted_data, jf)
+
+#     print(f"Extraction complete! Saved to {OUTPUT_JSON}")
+
+
+'''
+try 5 
+putting different years on different cores
+
+'''
+
 import os
 import glob
 import json
@@ -466,8 +621,8 @@ import pandas as pd
 import xarray as xr
 import netCDF4 as nc
 import warnings
-from tqdm import tqdm
 from multiprocessing import Pool, cpu_count
+from collections import defaultdict
 
 warnings.filterwarnings('ignore')
 
@@ -480,13 +635,16 @@ OUTPUT_JSON = './nldas_station_reports_sequential/ALL_STATIONS_NLDAS.json'
 
 NLDAS_TMP = 'Tair'      
 NLDAS_SPFH = 'Qair'    
-NLDAS_PSURF = 'PSurf' 
+NLDAS_PSURF = 'PSurf'
 
 os.makedirs(os.path.dirname(OUTPUT_JSON), exist_ok=True)
 
-# Define how many CPU cores to use. 
-# Leaves 2 cores free so the node doesn't freeze.
-NUM_WORKERS = max(1, cpu_count() - 2)
+# SLURM-aware CPU Count
+slurm_cpus = os.environ.get('SLURM_CPUS_PER_TASK')
+if slurm_cpus:
+    NUM_WORKERS = int(slurm_cpus)
+else:
+    NUM_WORKERS = max(1, cpu_count() - 2)
 
 # ==========================================
 # 1. GATHER ALL STATION COORDINATES
@@ -506,24 +664,30 @@ for stn_file in station_files:
         })
 
 df_meta = pd.DataFrame(station_meta)
-# These must be globally accessible for the worker processes
 stn_names = df_meta['Station'].values
-print(f"Found {len(df_meta)} valid stations.")
 
 # ==========================================
-# 2. FIND NLDAS FILES
+# 2. FIND & BATCH NLDAS FILES BY YEAR
 # ==========================================
 nldas_files = sorted(glob.glob(os.path.join(NLDAS_DIR, '*', '*.nc')))
-print(f"Found {len(nldas_files)} NLDAS files to process.")
+print(f"Found {len(nldas_files)} NLDAS files.")
+
+print("Batching files by year...")
+files_by_year = defaultdict(list)
+for f in nldas_files:
+    # NLDAS_FOR0010_H.A20010101.030.beta.nc -> '2001'
+    year = os.path.basename(f).split('.')[1][1:5]
+    files_by_year[year].append(f)
+
+print(f"Divided into {len(files_by_year)} yearly batches.")
 
 # ==========================================
-# 3. PRE-COMPUTE GRID INDICES (THE MASSIVE SPEEDUP)
+# 3. PRE-COMPUTE GRID INDICES
 # ==========================================
 print("Pre-computing nearest grid indices...")
 with xr.open_dataset(nldas_files[0], engine='netcdf4') as ds_ref:
     lat_var = 'lat' if 'lat' in ds_ref.coords else 'latitude'
     lon_var = 'lon' if 'lon' in ds_ref.coords else 'longitude'
-    
     grid_lats = ds_ref[lat_var].values
     grid_lons = ds_ref[lon_var].values
 
@@ -531,71 +695,69 @@ lat_idxs = [np.abs(grid_lats - stn_lat).argmin() for stn_lat in df_meta['lat']]
 lon_idxs = [np.abs(grid_lons - stn_lon).argmin() for stn_lon in df_meta['lon']]
 
 # ==========================================
-# 4. THE PARALLEL WORKER FUNCTION
+# 4. THE YEARLY WORKER FUNCTION
 # ==========================================
-def process_single_file(f):
+def process_single_year(batch_data):
     """
-    This function runs on a separate CPU core.
-    It reads ONE file and returns the data for all stations for that day.
+    Worker function: Processes a whole year of files on a single core.
     """
-    try:
-        basename = os.path.basename(f)
-        date_str = basename.split('.')[1][1:]  
-        yearmonth = date_str[:6]               
-        day = date_str   
-        
-        # This dictionary will hold just this file's data to send back to the main process
-        day_results = {}
-        
-        with nc.Dataset(f, 'r') as root:
-            tair_var = root.variables[NLDAS_TMP]
-            qair_var = root.variables[NLDAS_SPFH]
-            psurf_var = root.variables[NLDAS_PSURF]
+    year, files = batch_data
+    print(f"  -> Worker started on Year {year} ({len(files)} files)...", flush=True)
+    
+    # Dictionary to hold ONLY this year's data
+    year_results = {stn: {} for stn in stn_names}
+    error_count = 0
+    
+    for f in files:
+        try:
+            basename = os.path.basename(f)
+            date_str = basename.split('.')[1][1:]  
+            yearmonth = date_str[:6]               
+            day = date_str   
             
-            for stn_name, y_idx, x_idx in zip(stn_names, lat_idxs, lon_idxs):
-                stn_tair = tair_var[:, y_idx, x_idx].filled(np.nan)
-                stn_qair = qair_var[:, y_idx, x_idx].filled(np.nan)
-                stn_psurf = psurf_var[:, y_idx, x_idx].filled(np.nan)
+            with nc.Dataset(f, 'r') as root:
+                tair_var = root.variables[NLDAS_TMP]
+                qair_var = root.variables[NLDAS_SPFH]
+                psurf_var = root.variables[NLDAS_PSURF]
                 
-                day_results[stn_name] = {
-                    'tair': stn_tair.tolist(),
-                    'qair': stn_qair.tolist(),
-                    'psurf': stn_psurf.tolist()
-                }
-                
-        return yearmonth, day, day_results, None
-        
-    except Exception as e:
-        return None, None, None, f"Error reading {f}: {e}"
+                for stn_name, y_idx, x_idx in zip(stn_names, lat_idxs, lon_idxs):
+                    stn_tair = tair_var[:, y_idx, x_idx].filled(np.nan)
+                    stn_qair = qair_var[:, y_idx, x_idx].filled(np.nan)
+                    stn_psurf = psurf_var[:, y_idx, x_idx].filled(np.nan)
+                    
+                    if yearmonth not in year_results[stn_name]:
+                        year_results[stn_name][yearmonth] = {}
+                        
+                    year_results[stn_name][yearmonth][day] = {
+                        'tair': stn_tair.tolist(),
+                        'qair': stn_qair.tolist(),
+                        'psurf': stn_psurf.tolist()
+                    }
+        except Exception as e:
+            error_count += 1
+            
+    print(f"  <- Worker FINISHED Year {year}. (Errors: {error_count})", flush=True)
+    return year, year_results
 
 # ==========================================
-# 5. EXECUTE PARALLEL EXTRACTION
+# 5. EXECUTE PARALLEL BATCHES
 # ==========================================
-# The __name__ == '__main__' block is REQUIRED for multiprocessing to work safely
 if __name__ == '__main__':
-    print(f"Starting lightning-fast PARALLEL extraction on {NUM_WORKERS} cores...")
+    print(f"\nStarting Batched PARALLEL extraction on {NUM_WORKERS} cores...")
     
     extracted_data = {stn: {} for stn in stn_names}
     
-    # Launch the pool of CPU workers
+    # Prepare the task list: [(2001, [file1, file2...]), (2002, [file1, file2...])]
+    tasks = list(files_by_year.items())
+    
     with Pool(processes=NUM_WORKERS) as pool:
-        
-        # imap_unordered streams results back as soon as ANY file finishes
-        iterator = pool.imap_unordered(process_single_file, nldas_files)
-        
-        # Wrap the iterator in tqdm for a single, clean progress bar
-        for yearmonth, day, day_results, error_msg in tqdm(iterator, total=len(nldas_files), desc="Processing Files"):
+        # imap_unordered yields the results as soon as a year finishes
+        for year, year_results in pool.imap_unordered(process_single_year, tasks):
             
-            if error_msg:
-                print(f"\n{error_msg}")
-                continue
-                
-            # Merge the results from the worker core into our master dictionary
+            # Merge the completed year into the master dictionary
             for stn in stn_names:
-                if yearmonth not in extracted_data[stn]:
-                    extracted_data[stn][yearmonth] = {}
-                    
-                extracted_data[stn][yearmonth][day] = day_results[stn]
+                # Update our master dict with the year's worth of data for this station
+                extracted_data[stn].update(year_results[stn])
 
     # ==========================================
     # 6. SAVE TO JSON
