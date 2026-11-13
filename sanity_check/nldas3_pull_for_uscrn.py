@@ -610,6 +610,10 @@ try 4, like 2 but with multiprocessing
 '''
 try 5 
 putting different years on different cores
+-- this works well! 
+
+We are going to prioritize different areas: 
+['TX', 'IL', 'OH',  'VA', 'IL', 'IA', 'NC', 'NM', 'NE']
 
 '''
 
