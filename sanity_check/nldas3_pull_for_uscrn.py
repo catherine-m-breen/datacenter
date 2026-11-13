@@ -78,12 +78,18 @@ chunk_size = 100  # Write to disk every 500 files to save RAM
 
 import IPython
 import tqdm
+times_list = []
+tair_list = []
+qair_list = []
+psurf_list = []
+
 for i, f in tqdm.tqdm(enumerate(nldas_files)):
     try:
         with xr.open_dataset(f, engine='netcdf4') as ds:
             lat_var = 'lat' if 'lat' in ds.coords else 'latitude'
             lon_var = 'lon' if 'lon' in ds.coords else 'longitude'
-            
+            time_var = 'time' if 'time' in ds.coords else 'valid_time' 
+
             # --- THE MAGIC FORMULA ---
             # This extracts all stations at once using nearest neighbor
             ds_pts = ds.sel({lat_var: lats_da, lon_var: lons_da}, method='nearest')
@@ -93,7 +99,8 @@ for i, f in tqdm.tqdm(enumerate(nldas_files)):
             
             # Convert to pandas dataframe
             IPython.embed()
-            df_pt = ds_pts[[NLDAS_TMP, NLDAS_SPFH, NLDAS_PSURF]].to_dataframe().reset_index()
+            ## need to switch this to numpy array with lat/ long too 
+            #df_pt = ds_pts[[NLDAS_TMP, NLDAS_SPFH, NLDAS_PSURF]].to_dataframe().reset_index()
             
             # Clean up columns (rename 'time' to 'datetime')
             time_var = 'time' if 'time' in df_pt.columns else 'valid_time'

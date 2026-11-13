@@ -25,3 +25,5 @@ scp -r cmbreen@discover.nccs.nasa.gov:/discover/nobackup/cmbreen/datacenters/dat
 
 
 scp -r /Users/cmbreen/code/datacenter/tmy_comparison/tmy_data cmbreen@discover.nccs.nasa.gov:/discover/nobackup/cmbreen/datacenters/
+
+scp -r /Users/cmbreen/Documents/datacenters/noaa_tmy_downloads_datacenterslocs cmbreen@discover.nccs.nasa.gov:/discover/nobackup/cmbreen/datacenters/
