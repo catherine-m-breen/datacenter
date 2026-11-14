@@ -617,6 +617,170 @@ We are going to prioritize different areas:
 
 '''
 
+# import os
+# import glob
+# import json
+# import numpy as np
+# import pandas as pd
+# import xarray as xr
+# import netCDF4 as nc
+# import warnings
+# from multiprocessing import Pool, cpu_count
+# from collections import defaultdict
+
+# warnings.filterwarnings('ignore')
+
+# # ==========================================
+# # CONFIGURATION
+# # ==========================================
+# NLDAS_DIR = '/discover/nobackup/projects/eis_nldas3/DATA/forcing/hourly'
+# STATION_DIR = '/discover/nobackup/cmbreen/datacenters/uscrn_independent_data'
+# OUTPUT_JSON = './nldas_station_reports_sequential/ALL_STATIONS_NLDAS.json'
+
+# NLDAS_TMP = 'Tair'      
+# NLDAS_SPFH = 'Qair'    
+# NLDAS_PSURF = 'PSurf'
+
+# os.makedirs(os.path.dirname(OUTPUT_JSON), exist_ok=True)
+
+# # SLURM-aware CPU Count
+# slurm_cpus = os.environ.get('SLURM_CPUS_PER_TASK')
+# if slurm_cpus:
+#     NUM_WORKERS = int(slurm_cpus)
+# else:
+#     NUM_WORKERS = max(1, cpu_count() - 2)
+
+# # ==========================================
+# # 1. GATHER ALL STATION COORDINATES
+# # ==========================================
+# print("Gathering station coordinates...")
+# station_files = [f for f in glob.glob(os.path.join(STATION_DIR, '*.csv')) if not os.path.basename(f).startswith('all_')]
+
+# station_meta = []
+# for stn_file in station_files:
+#     stn_name = os.path.basename(stn_file).replace('.csv', '')
+#     df_temp = pd.read_csv(stn_file, nrows=1)
+#     if 'latitude' in df_temp.columns and 'longitude' in df_temp.columns:
+#         station_meta.append({
+#             'Station': stn_name,
+#             'lat': df_temp['latitude'].iloc[0],
+#             'lon': df_temp['longitude'].iloc[0]
+#         })
+
+# df_meta = pd.DataFrame(station_meta)
+# stn_names = df_meta['Station'].values
+
+# # ==========================================
+# # 2. FIND & BATCH NLDAS FILES BY YEAR
+# # ==========================================
+# nldas_files = sorted(glob.glob(os.path.join(NLDAS_DIR, '*', '*.nc')))
+# print(f"Found {len(nldas_files)} NLDAS files.")
+
+# print("Batching files by year...")
+# files_by_year = defaultdict(list)
+# for f in nldas_files:
+#     # NLDAS_FOR0010_H.A20010101.030.beta.nc -> '2001'
+#     year = os.path.basename(f).split('.')[1][1:5]
+#     files_by_year[year].append(f)
+
+# print(f"Divided into {len(files_by_year)} yearly batches.")
+
+# # ==========================================
+# # 3. PRE-COMPUTE GRID INDICES
+# # ==========================================
+# print("Pre-computing nearest grid indices...")
+# with xr.open_dataset(nldas_files[0], engine='netcdf4') as ds_ref:
+#     lat_var = 'lat' if 'lat' in ds_ref.coords else 'latitude'
+#     lon_var = 'lon' if 'lon' in ds_ref.coords else 'longitude'
+#     grid_lats = ds_ref[lat_var].values
+#     grid_lons = ds_ref[lon_var].values
+
+# lat_idxs = [np.abs(grid_lats - stn_lat).argmin() for stn_lat in df_meta['lat']]
+# lon_idxs = [np.abs(grid_lons - stn_lon).argmin() for stn_lon in df_meta['lon']]
+
+# # ==========================================
+# # 4. THE YEARLY WORKER FUNCTION
+# # ==========================================
+# def process_single_year(batch_data):
+#     """
+#     Worker function: Processes a whole year of files on a single core.
+#     """
+#     year, files = batch_data
+#     print(f"  -> Worker started on Year {year} ({len(files)} files)...", flush=True)
+    
+#     # Dictionary to hold ONLY this year's data
+#     year_results = {stn: {} for stn in stn_names}
+#     error_count = 0
+#     import tqdm
+#     for f in tqdm.tqdm(files):
+#         try:
+#             basename = os.path.basename(f)
+#             date_str = basename.split('.')[1][1:]  
+#             yearmonth = date_str[:6]               
+#             day = date_str   
+            
+#             with nc.Dataset(f, 'r') as root:
+#                 tair_var = root.variables[NLDAS_TMP]
+#                 qair_var = root.variables[NLDAS_SPFH]
+#                 psurf_var = root.variables[NLDAS_PSURF]
+                
+#                 for stn_name, y_idx, x_idx in zip(stn_names, lat_idxs, lon_idxs):
+#                     stn_tair = tair_var[:, y_idx, x_idx].filled(np.nan)
+#                     stn_qair = qair_var[:, y_idx, x_idx].filled(np.nan)
+#                     stn_psurf = psurf_var[:, y_idx, x_idx].filled(np.nan)
+                    
+#                     if yearmonth not in year_results[stn_name]:
+#                         year_results[stn_name][yearmonth] = {}
+                        
+#                     year_results[stn_name][yearmonth][day] = {
+#                         'tair': stn_tair.tolist(),
+#                         'qair': stn_qair.tolist(),
+#                         'psurf': stn_psurf.tolist()
+#                     }
+#                     print(year, f)
+#         except Exception as e:
+#             error_count += 1
+            
+#     print(f"  <- Worker FINISHED Year {year}. (Errors: {error_count})", flush=True)
+#     return year, year_results
+
+# # ==========================================
+# # 5. EXECUTE PARALLEL BATCHES
+# # ==========================================
+# if __name__ == '__main__':
+#     print(f"\nStarting Batched PARALLEL extraction on {NUM_WORKERS} cores...")
+    
+#     extracted_data = {stn: {} for stn in stn_names}
+    
+#     # Prepare the task list: [(2001, [file1, file2...]), (2002, [file1, file2...])]
+#     tasks = list(files_by_year.items())
+    
+#     with Pool(processes=NUM_WORKERS) as pool:
+#         # imap_unordered yields the results as soon as a year finishes
+#         for year, year_results in pool.imap_unordered(process_single_year, tasks):
+            
+#             # Merge the completed year into the master dictionary
+#             for stn in stn_names:
+#                 # Update our master dict with the year's worth of data for this station
+#                 extracted_data[stn].update(year_results[stn])
+
+#     # ==========================================
+#     # 6. SAVE TO JSON
+#     # ==========================================
+#     print("\nSaving to JSON...")
+#     with open(OUTPUT_JSON, 'w') as jf:
+#         json.dump(extracted_data, jf)
+
+#     print(f"Extraction complete! Saved to {OUTPUT_JSON}")
+
+'''
+
+try 6 
+
+does multi core processing, prioroitizes states and saves progress
+
+'''
+
 import os
 import glob
 import json
@@ -635,13 +799,19 @@ warnings.filterwarnings('ignore')
 # ==========================================
 NLDAS_DIR = '/discover/nobackup/projects/eis_nldas3/DATA/forcing/hourly'
 STATION_DIR = '/discover/nobackup/cmbreen/datacenters/uscrn_independent_data'
-OUTPUT_JSON = './nldas_station_reports_sequential/ALL_STATIONS_NLDAS.json'
+
+OUTPUT_DIR = './nldas_station_reports_sequential'
+INTERMEDIATE_DIR = os.path.join(OUTPUT_DIR, 'yearly_checkpoints')
+FINAL_JSON = os.path.join(OUTPUT_DIR, 'PRIORITY_STATIONS_NLDAS.json')
+
+os.makedirs(INTERMEDIATE_DIR, exist_ok=True)
 
 NLDAS_TMP = 'Tair'      
 NLDAS_SPFH = 'Qair'    
 NLDAS_PSURF = 'PSurf'
 
-os.makedirs(os.path.dirname(OUTPUT_JSON), exist_ok=True)
+# List of areas to prioritize (duplicates removed)
+PRIORITY_STATES = ['TX', 'IL', 'OH', 'VA', 'IA', 'NC', 'NM', 'NE']
 
 # SLURM-aware CPU Count
 slurm_cpus = os.environ.get('SLURM_CPUS_PER_TASK')
@@ -651,10 +821,16 @@ else:
     NUM_WORKERS = max(1, cpu_count() - 2)
 
 # ==========================================
-# 1. GATHER ALL STATION COORDINATES
+# 1. GATHER PRIORITY STATION COORDINATES
 # ==========================================
-print("Gathering station coordinates...")
-station_files = [f for f in glob.glob(os.path.join(STATION_DIR, '*.csv')) if not os.path.basename(f).startswith('all_')]
+print(f"Gathering station coordinates for priority states: {PRIORITY_STATES}...")
+all_station_files = [f for f in glob.glob(os.path.join(STATION_DIR, '*.csv')) if not os.path.basename(f).startswith('all_')]
+
+station_files = []
+for f in all_station_files:
+    base = os.path.basename(f)
+    if any(base.startswith(f"{state}_") for state in PRIORITY_STATES):
+        station_files.append(f)
 
 station_meta = []
 for stn_file in station_files:
@@ -669,106 +845,138 @@ for stn_file in station_files:
 
 df_meta = pd.DataFrame(station_meta)
 stn_names = df_meta['Station'].values
+print(f"Found {len(df_meta)} valid stations matching priority states.")
 
 # ==========================================
 # 2. FIND & BATCH NLDAS FILES BY YEAR
 # ==========================================
 nldas_files = sorted(glob.glob(os.path.join(NLDAS_DIR, '*', '*.nc')))
-print(f"Found {len(nldas_files)} NLDAS files.")
+print(f"Found {len(nldas_files)} total NLDAS files.")
 
 print("Batching files by year...")
 files_by_year = defaultdict(list)
 for f in nldas_files:
-    # NLDAS_FOR0010_H.A20010101.030.beta.nc -> '2001'
-    year = os.path.basename(f).split('.')[1][1:5]
-    files_by_year[year].append(f)
-
-print(f"Divided into {len(files_by_year)} yearly batches.")
-
-# ==========================================
-# 3. PRE-COMPUTE GRID INDICES
-# ==========================================
-print("Pre-computing nearest grid indices...")
-with xr.open_dataset(nldas_files[0], engine='netcdf4') as ds_ref:
-    lat_var = 'lat' if 'lat' in ds_ref.coords else 'latitude'
-    lon_var = 'lon' if 'lon' in ds_ref.coords else 'longitude'
-    grid_lats = ds_ref[lat_var].values
-    grid_lons = ds_ref[lon_var].values
-
-lat_idxs = [np.abs(grid_lats - stn_lat).argmin() for stn_lat in df_meta['lat']]
-lon_idxs = [np.abs(grid_lons - stn_lon).argmin() for stn_lon in df_meta['lon']]
+    try:
+        year = os.path.basename(f).split('.')[1][1:5]
+        files_by_year[year].append(f)
+    except IndexError:
+        continue
 
 # ==========================================
-# 4. THE YEARLY WORKER FUNCTION
+# 3. RESUME LOGIC (SKIP COMPLETED YEARS)
 # ==========================================
-def process_single_year(batch_data):
-    """
-    Worker function: Processes a whole year of files on a single core.
-    """
-    year, files = batch_data
-    print(f"  -> Worker started on Year {year} ({len(files)} files)...", flush=True)
+tasks = []
+for year, files in files_by_year.items():
+    year_output_file = os.path.join(INTERMEDIATE_DIR, f"{year}_extracted.json")
     
-    # Dictionary to hold ONLY this year's data
-    year_results = {stn: {} for stn in stn_names}
-    error_count = 0
-    import tqdm
-    for f in tqdm.tqdm(files):
-        try:
-            basename = os.path.basename(f)
-            date_str = basename.split('.')[1][1:]  
-            yearmonth = date_str[:6]               
-            day = date_str   
-            
-            with nc.Dataset(f, 'r') as root:
-                tair_var = root.variables[NLDAS_TMP]
-                qair_var = root.variables[NLDAS_SPFH]
-                psurf_var = root.variables[NLDAS_PSURF]
+    # If the final clean JSON exists for this year, skip it
+    if os.path.exists(year_output_file):
+        print(f"  [SKIP] Year {year} is already processed. Skipping.")
+    else:
+        # Package the year, the file list, and the target output path for the worker
+        tasks.append((year, files, year_output_file))
+
+print(f"\n{len(tasks)} years left to process out of {len(files_by_year)} total years.")
+
+# If nothing to process, skip right to merging
+if len(tasks) > 0:
+    # ==========================================
+    # 4. PRE-COMPUTE GRID INDICES
+    # ==========================================
+    print("Pre-computing nearest grid indices...")
+    with xr.open_dataset(nldas_files[0], engine='netcdf4') as ds_ref:
+        lat_var = 'lat' if 'lat' in ds_ref.coords else 'latitude'
+        lon_var = 'lon' if 'lon' in ds_ref.coords else 'longitude'
+        grid_lats = ds_ref[lat_var].values
+        grid_lons = ds_ref[lon_var].values
+
+    lat_idxs = [np.abs(grid_lats - stn_lat).argmin() for stn_lat in df_meta['lat']]
+    lon_idxs = [np.abs(grid_lons - stn_lon).argmin() for stn_lon in df_meta['lon']]
+
+    # ==========================================
+    # 5. THE YEARLY WORKER FUNCTION
+    # ==========================================
+    def process_single_year(batch_data):
+        year, files, out_path = batch_data
+        total_files = len(files)
+        print(f"  -> Worker started on Year {year} ({total_files} files)...", flush=True)
+        
+        year_results = {stn: {} for stn in stn_names}
+        error_count = 0
+        
+        for i, f in enumerate(files):
+            try:
+                basename = os.path.basename(f)
+                date_str = basename.split('.')[1][1:]  
+                yearmonth = date_str[:6]               
+                day = date_str   
                 
-                for stn_name, y_idx, x_idx in zip(stn_names, lat_idxs, lon_idxs):
-                    stn_tair = tair_var[:, y_idx, x_idx].filled(np.nan)
-                    stn_qair = qair_var[:, y_idx, x_idx].filled(np.nan)
-                    stn_psurf = psurf_var[:, y_idx, x_idx].filled(np.nan)
+                with nc.Dataset(f, 'r') as root:
+                    tair_var = root.variables[NLDAS_TMP]
+                    qair_var = root.variables[NLDAS_SPFH]
+                    psurf_var = root.variables[NLDAS_PSURF]
                     
-                    if yearmonth not in year_results[stn_name]:
-                        year_results[stn_name][yearmonth] = {}
+                    for stn_name, y_idx, x_idx in zip(stn_names, lat_idxs, lon_idxs):
+                        stn_tair = tair_var[:, y_idx, x_idx].filled(np.nan)
+                        stn_qair = qair_var[:, y_idx, x_idx].filled(np.nan)
+                        stn_psurf = psurf_var[:, y_idx, x_idx].filled(np.nan)
                         
-                    year_results[stn_name][yearmonth][day] = {
-                        'tair': stn_tair.tolist(),
-                        'qair': stn_qair.tolist(),
-                        'psurf': stn_psurf.tolist()
-                    }
-                    print(year, f)
-        except Exception as e:
-            error_count += 1
-            
-    print(f"  <- Worker FINISHED Year {year}. (Errors: {error_count})", flush=True)
-    return year, year_results
+                        if yearmonth not in year_results[stn_name]:
+                            year_results[stn_name][yearmonth] = {}
+                            
+                        year_results[stn_name][yearmonth][day] = {
+                            'tair': stn_tair.tolist(),
+                            'qair': stn_qair.tolist(),
+                            'psurf': stn_psurf.tolist()
+                        }
+                        
+            except Exception as e:
+                error_count += 1
+                
+            if (i + 1) % 2000 == 0:
+                print(f"     Year {year} progress: {i + 1}/{total_files} files processed.", flush=True)
+                
+        # SAVE THIS YEAR TO DISK (Atomically)
+        temp_path = out_path + ".tmp"
+        with open(temp_path, 'w') as jf:
+            json.dump(year_results, jf)
+        os.rename(temp_path, out_path) # Rename safely confirms completion
+        
+        print(f"  <- Worker FINISHED and SAVED Year {year}. (Errors: {error_count})", flush=True)
+        return year
+
+    # ==========================================
+    # 6. EXECUTE PARALLEL BATCHES
+    # ==========================================
+    if __name__ == '__main__':
+        print(f"\nStarting Batched PARALLEL extraction on {NUM_WORKERS} cores...")
+        
+        with Pool(processes=NUM_WORKERS) as pool:
+            # We don't need to return data to main process anymore, it writes straight to disk
+            for completed_year in pool.imap_unordered(process_single_year, tasks):
+                pass 
 
 # ==========================================
-# 5. EXECUTE PARALLEL BATCHES
+# 7. FINAL MERGE OF ALL CHECKPOINTS
 # ==========================================
 if __name__ == '__main__':
-    print(f"\nStarting Batched PARALLEL extraction on {NUM_WORKERS} cores...")
+    print("\nMerging all completed years into the final JSON...")
     
-    extracted_data = {stn: {} for stn in stn_names}
+    master_data = {stn: {} for stn in stn_names}
     
-    # Prepare the task list: [(2001, [file1, file2...]), (2002, [file1, file2...])]
-    tasks = list(files_by_year.items())
+    # Grab all the successfully processed yearly files
+    completed_files = glob.glob(os.path.join(INTERMEDIATE_DIR, '*_extracted.json'))
     
-    with Pool(processes=NUM_WORKERS) as pool:
-        # imap_unordered yields the results as soon as a year finishes
-        for year, year_results in pool.imap_unordered(process_single_year, tasks):
+    for c_file in completed_files:
+        with open(c_file, 'r') as jf:
+            year_data = json.load(jf)
             
-            # Merge the completed year into the master dictionary
+            # Merge this year's records into the master station dict
             for stn in stn_names:
-                # Update our master dict with the year's worth of data for this station
-                extracted_data[stn].update(year_results[stn])
+                if stn in year_data:
+                    master_data[stn].update(year_data[stn])
 
-    # ==========================================
-    # 6. SAVE TO JSON
-    # ==========================================
-    print("\nSaving to JSON...")
-    with open(OUTPUT_JSON, 'w') as jf:
-        json.dump(extracted_data, jf)
+    with open(FINAL_JSON, 'w') as jf:
+        json.dump(master_data, jf)
 
-    print(f"Extraction complete! Saved to {OUTPUT_JSON}")
+    print(f"Extraction and Merge complete! Final data saved to {FINAL_JSON}")
