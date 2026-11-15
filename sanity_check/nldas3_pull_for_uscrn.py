@@ -801,7 +801,7 @@ NLDAS_DIR = '/discover/nobackup/projects/eis_nldas3/DATA/forcing/hourly'
 STATION_DIR = '/discover/nobackup/cmbreen/datacenters/uscrn_independent_data'
 
 OUTPUT_DIR = './nldas_station_reports_sequential'
-INTERMEDIATE_DIR = os.path.join(OUTPUT_DIR, 'yearly_checkpoints')
+INTERMEDIATE_DIR = os.path.join(OUTPUT_DIR, 'yearly_checkpoints_ALL')
 FINAL_JSON = os.path.join(OUTPUT_DIR, 'PRIORITY_STATIONS_NLDAS.json')
 
 os.makedirs(INTERMEDIATE_DIR, exist_ok=True)
