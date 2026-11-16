@@ -792,8 +792,24 @@ outputs:
 '''
 
 this one also does the missing data checks. 
-'''
 
+- It checks for missing data and saves a list of exact missing timestamps 
+to a file ({stn_name}_missing_timestamps.csv) so you can track outages.
+- tracks extreme values and years when RH is 0 more than 75% of the time
+- converts NLDAS3 kelvin to celsius
+- conducts inner join so that every USCRN value has a NLDAS3 value
+
+Then for each station: 
+1. Scatter plots, overall and seasonal bias
+2. timeseries for every 5 years 
+
+Overall
+1. overall bias
+2 breakdown by state
+3. breakdown by climate 
+
+
+'''
 import os
 import glob
 import json
@@ -809,9 +825,10 @@ import multiprocessing
 warnings.filterwarnings('ignore')
 
 # ==========================================
-# CONFIGURATION TOGGLES
+# CONFIGURATION
 # ==========================================
-JSON_DATA_PATH = './nldas_station_reports_sequential/PRIORITY_STATIONS_NLDAS.json'
+# Pointing directly to your folder of yearly JSONs:
+JSON_DATA_DIR = './nldas_station_reports_sequential/yearly_checkpoints_ALL'
 STATION_DIR = '/discover/nobackup/cmbreen/datacenters/uscrn_independent_data'
 OUTPUT_DIR = './station_comprehensive_reports'
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -822,9 +839,17 @@ VARS_TO_PLOT = [('T_C_obs', 'T_C_sim', 'Temp (°C)', 'T_C'),
                 ('RH_obs', 'RH_derived', 'Rel. Humidity (%)', 'RH'),
                 ('Enthalpy_kJ_kg_obs', 'Enthalpy_kJ_kg_sim', 'Enthalpy (kJ/kg)', 'Enthalpy')]
 
-THRESHOLDS = {
-    'temperature': {'low': -40.0, 'high': 50.0},
-    'relative_humidity': {'low': 0.0, 'high': 100.0}
+TARGET_TS_YEARS = [2005, 2010, 2015, 2020, 2025]
+
+# Standard US Climate Regions Mapping
+STATE_TO_CLIMATE = {
+    'WA': 'PNW', 'OR': 'PNW', 'ID': 'PNW',
+    'IL': 'Midwest', 'IN': 'Midwest', 'IA': 'Midwest', 'MI': 'Midwest', 'MN': 'Midwest', 'OH': 'Midwest', 'WI': 'Midwest',
+    'CT': 'New England', 'ME': 'New England', 'MA': 'New England', 'NH': 'New England', 'RI': 'New England', 'VT': 'New England', 'NY': 'New England', 'PA': 'New England', 'NJ': 'New England',
+    'AZ': 'Southwest', 'NM': 'Southwest', 'UT': 'Southwest', 'NV': 'Southwest', 'CA': 'Southwest',
+    'AR': 'South', 'LA': 'South', 'MS': 'South', 'AL': 'South', 'GA': 'South', 'FL': 'South', 'SC': 'South', 'NC': 'South', 'VA': 'South', 'TN': 'South', 'KY': 'South',
+    'ND': 'Plains', 'SD': 'Plains', 'NE': 'Plains', 'KS': 'Plains', 'OK': 'Plains', 'TX': 'Plains', 'MO': 'Plains',
+    'MT': 'Rockies', 'WY': 'Rockies', 'CO': 'Rockies'
 }
 
 # ==========================================
@@ -849,18 +874,42 @@ def get_season(month):
     elif month in [6, 7, 8]: return 'Summer'
     else: return 'Fall'
 
-def compute_bias_str(bias_val, unit):
-    direction = "positive" if bias_val > 0 else "negative"
-    return f"{direction} {abs(bias_val):.2f}{unit}"
+def calc_metrics(obs, sim):
+    if len(obs) < 5: return np.nan, np.nan, np.nan
+    r2 = r2_score(obs, sim)
+    bias = np.mean(sim - obs)
+    rmse = np.sqrt(mean_squared_error(obs, sim))
+    return r2, bias, rmse
+
+def render_table_page(pdf, df, title):
+    fig, ax = plt.subplots(figsize=(14, 6))
+    ax.axis('tight')
+    ax.axis('off')
+    
+    table = ax.table(cellText=df.values, colLabels=df.columns, loc='center', cellLoc='center')
+    table.auto_set_font_size(False)
+    table.set_fontsize(10)
+    table.scale(1, 1.5)
+    
+    # Bold the headers
+    for (row, col), cell in table.get_celld().items():
+        if row == 0:
+            cell.set_text_props(weight='bold')
+            
+    fig.suptitle(title, fontsize=16, fontweight='bold')
+    plt.tight_layout()
+    pdf.savefig(fig)
+    plt.close(fig)
 
 # ==========================================
-# PARALLEL WORKER FUNCTION (Processes 1 Station)
+# PARALLEL WORKER FUNCTION
 # ==========================================
 def process_station(worker_payload):
     stn_name, stn_file, stn_json_data, output_dir = worker_payload
     state = stn_name.split('_')[0]
+    climate = STATE_TO_CLIMATE.get(state, 'Unknown')
     
-    # 1. LOAD OBSERVATIONS & QAQC
+    # 1. LOAD OBSERVATIONS & IDENTIFY EXTREMES
     df_stn = pd.read_csv(stn_file)
     df_stn = df_stn.rename(columns={'temperature': 'T_C', 'relative_humidity': 'RH_obs'})
     df_stn['T_C'] = pd.to_numeric(df_stn['T_C'], errors='coerce')
@@ -878,16 +927,19 @@ def process_station(worker_payload):
             os.path.join(output_dir, f"{stn_name}_missing_timestamps.csv"), index=False)
 
     df_stn['datetime'] = pd.to_datetime(df_stn['datetime'], errors='coerce').dt.tz_localize(None).dt.round('h')
-    df_stn = df_stn.set_index('datetime')
     
     # Check if 2008-2010 is completely missing for RH
-    rh_08_10 = df_stn[(df_stn.index.year >= 2008) & (df_stn.index.year <= 2010)]['RH_obs']
+    rh_08_10 = df_stn[(df_stn['datetime'].dt.year >= 2008) & (df_stn['datetime'].dt.year <= 2010)]['RH_obs']
     is_missing_08_10 = (rh_08_10.isna().mean() > 0.85) if len(rh_08_10) > 0 else True
 
-    # Apply Strict Valid Ranges (Temp -40 to 50, RH 0 to 100)
-    df_stn.loc[(df_stn['T_C'] < THRESHOLDS['temperature']['low']) | (df_stn['T_C'] > THRESHOLDS['temperature']['high']), 'T_C'] = np.nan       
-    df_stn.loc[(df_stn['RH_obs'] < THRESHOLDS['relative_humidity']['low']) | (df_stn['RH_obs'] > THRESHOLDS['relative_humidity']['high']), 'RH_obs'] = np.nan   
+    # Track Extremes
+    ext_mask = (df_stn['T_C'] < -40) | (df_stn['T_C'] > 50) | (df_stn['RH_obs'] < 0) | (df_stn['RH_obs'] > 100)
+    df_extremes = df_stn[ext_mask][['datetime', 'T_C', 'RH_obs']].copy()
+    df_extremes['Station'] = stn_name
     
+    # Clean up station dataset
+    df_stn.loc[ext_mask, ['T_C', 'RH_obs']] = np.nan
+    df_stn = df_stn.set_index('datetime')
     df_stn = calc_psychrometrics(df_stn, source='station')
     
     # 2. PARSE NLDAS JSON
@@ -898,68 +950,117 @@ def process_station(worker_payload):
             for h in range(len(data_dict['tair'])):
                 records.append({'datetime': base_dt + pd.Timedelta(hours=h), 'Tair': data_dict['tair'][h], 'Qair': data_dict['qair'][h]})
                 
-    if not records: return stn_name, None, None
+    if not records: return stn_name, None, df_extremes, [], None
         
     df_nldas = pd.DataFrame(records).set_index('datetime')
     df_nldas['T_C'] = df_nldas['Tair'] - 273.15 if df_nldas['Tair'].mean() > 200 else df_nldas['Tair']
     df_nldas['Q_kg_kg'] = df_nldas['Qair']
     df_nldas = calc_psychrometrics(df_nldas, source='nldas')
     
-    # 3. MERGE DATA (Inner Join - Drops missing obs)
+    # 3. MERGE & QAQC BAD YEARS
     merged = df_stn[['T_C', 'RH_obs', 'Enthalpy_kJ_kg']].join(
         df_nldas[['T_C', 'RH_derived', 'Enthalpy_kJ_kg']], lsuffix='_obs', rsuffix='_sim', how='inner'
-    ).dropna()
+    )
     
-    if merged.empty: return stn_name, None, None
-        
-    merged['season'] = merged.index.month.map(get_season)
+    merged['Year'] = merged.index.year
+    merged['Season'] = merged.index.month.map(get_season)
     merged['Station'] = stn_name
     merged['State'] = state
+    merged['Climate'] = climate
+    
+    # Drop years where RH is <= 0 for > 75% of the year
+    bad_years = []
+    for yr, group in merged.groupby('Year'):
+        valid_rh = group['RH_obs'].dropna()
+        if len(valid_rh) > 0 and (valid_rh <= 0).mean() > 0.75:
+            bad_years.append({'Station': stn_name, 'Year': yr})
+            
+    bad_yr_list = [d['Year'] for d in bad_years]
+    merged = merged[~merged['Year'].isin(bad_yr_list)].dropna()
 
-    # 4. PLOTTING: Station Comprehensive PDF
-    pdf_path = os.path.join(output_dir, f"{stn_name}_analysis_report.pdf")
+    if merged.empty: return stn_name, None, df_extremes, bad_years, None
+
+    # 4. PLOTTING INDIVIDUAL PDF
+    pdf_path = os.path.join(output_dir, f"{stn_name}_analysis.pdf")
     with PdfPages(pdf_path) as pdf:
         
-        # PAGE 1: Overall Scatter & Stats
-        fig, axes = plt.subplots(1, 3, figsize=(18, 6))
-        fig.suptitle(f"Overall R² and Bias: {stn_name}", fontsize=16, fontweight='bold')
-        for ax, (obs_col, sim_col, title, _) in zip(axes, VARS_TO_PLOT):
-            obs, sim = merged[obs_col], merged[sim_col]
-            r2, bias = r2_score(obs, sim), np.mean(sim - obs)
-            ax.scatter(obs, sim, alpha=0.1, s=2, c='purple')
-            mn, mx = min(obs.min(), sim.min()), max(obs.max(), sim.max())
-            ax.plot([mn, mx], [mn, mx], 'k--', lw=2, label='1:1 Line')
-            ax.set_title(f"{title}\nR²: {r2:.3f} | Bias: {bias:.3f}")
-            ax.set_xlabel("Observations"); ax.set_ylabel("NLDAS3")
-            ax.grid(True, alpha=0.3); ax.legend()
-        plt.tight_layout(); pdf.savefig(fig); plt.close(fig)
+        years = sorted(merged['Year'].unique())
+        
+        # A. YEARLY SCATTER PLOTS (6 per page = 2 cols x 3 rows)
+        for i in range(0, len(years), 2):
+            yr1 = years[i]
+            yr2 = years[i+1] if i+1 < len(years) else None
+            
+            fig, axes = plt.subplots(3, 2, figsize=(12, 14))
+            fig.suptitle(f"Yearly Scatter Comparisons: {stn_name}", fontsize=16, fontweight='bold')
+            
+            for col, yr in enumerate([yr1, yr2]):
+                if yr is None:
+                    for r in range(3): axes[r, col].axis('off')
+                    continue
+                
+                df_yr = merged[merged['Year'] == yr]
+                
+                for r, (obs_col, sim_col, title, _) in enumerate(VARS_TO_PLOT):
+                    ax = axes[r, col]
+                    obs, sim = df_yr[obs_col], df_yr[sim_col]
+                    r2, bias, rmse = calc_metrics(obs, sim)
+                    
+                    ax.scatter(obs, sim, alpha=0.2, s=5, c='teal')
+                    mn, mx = min(obs.min(), sim.min()), max(obs.max(), sim.max())
+                    ax.plot([mn, mx], [mn, mx], 'k--', lw=1)
+                    
+                    ax.set_title(f"{yr} | {title}\nR²: {r2:.2f} | Bias: {bias:.2f} | RMSE: {rmse:.2f}")
+                    ax.set_xlabel("USCRN Obs"); ax.set_ylabel("NLDAS3")
+                    ax.grid(True, alpha=0.3)
+                    
+            plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+            pdf.savefig(fig); plt.close(fig)
+            
+        # B. TARGET TIMESERIES (2x2 Grid per target year)
+        for yr in TARGET_TS_YEARS:
+            if yr not in years: continue
+            
+            df_yr = merged[merged['Year'] == yr]
+            fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+            fig.suptitle(f"{yr} Time Series: {stn_name}", fontsize=16, fontweight='bold')
+            
+            # Temp
+            axes[0,0].plot(df_yr.index, df_yr['T_C_obs'], label='Obs', alpha=0.8)
+            axes[0,0].plot(df_yr.index, df_yr['T_C_sim'], label='NLDAS3', alpha=0.8)
+            axes[0,0].set_title("Temperature (°C)"); axes[0,0].legend()
+            
+            # RH
+            axes[0,1].plot(df_yr.index, df_yr['RH_obs'], alpha=0.8)
+            axes[0,1].plot(df_yr.index, df_yr['RH_derived'], alpha=0.8)
+            axes[0,1].set_title("Relative Humidity (%)")
+            
+            # Enthalpy
+            axes[1,0].plot(df_yr.index, df_yr['Enthalpy_kJ_kg_obs'], alpha=0.8)
+            axes[1,0].plot(df_yr.index, df_yr['Enthalpy_kJ_kg_sim'], alpha=0.8)
+            axes[1,0].set_title("Enthalpy (kJ/kg)")
+            
+            axes[1,1].axis('off') # Leave 4th quadrant empty
+            plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+            pdf.savefig(fig); plt.close(fig)
 
-        # PAGES 2-5: 2018 Seasonal Breakdown
-        df_2018 = merged[merged.index.year == 2018]
-        if not df_2018.empty:
-            for season in ['Winter', 'Spring', 'Summer', 'Fall']:
-                season_data = df_2018[df_2018['season'] == season]
-                if season_data.empty: continue
-                
-                fig, axes = plt.subplots(3, 1, figsize=(14, 10), sharex=True)
-                fig.suptitle(f"2018 {season} Timeseries: {stn_name}", fontsize=16, fontweight='bold')
-                
-                # Temperature
-                axes[0].plot(season_data.index, season_data['T_C_obs'], label='USCRN Obs', alpha=0.8)
-                axes[0].plot(season_data.index, season_data['T_C_sim'], label='NLDAS3', alpha=0.8)
-                axes[0].set_ylabel("Temp (°C)"); axes[0].legend(); axes[0].grid(True, alpha=0.3)
-                
-                # Relative Humidity
-                axes[1].plot(season_data.index, season_data['RH_obs'], alpha=0.8)
-                axes[1].plot(season_data.index, season_data['RH_derived'], alpha=0.8)
-                axes[1].set_ylabel("RH (%)"); axes[1].grid(True, alpha=0.3)
-                
-                # Enthalpy
-                axes[2].plot(season_data.index, season_data['Enthalpy_kJ_kg_obs'], alpha=0.8)
-                axes[2].plot(season_data.index, season_data['Enthalpy_kJ_kg_sim'], alpha=0.8)
-                axes[2].set_ylabel("Enthalpy (kJ/kg)"); axes[2].set_xlabel("Date"); axes[2].grid(True, alpha=0.3)
-                
-                plt.tight_layout(); pdf.savefig(fig); plt.close(fig)
+        # C. STATION SUMMARY TABLE
+        table_rows = []
+        
+        def build_row(df_slice, name):
+            row = [name]
+            for obs_col, sim_col, _, _ in VARS_TO_PLOT:
+                r2, bias, rmse = calc_metrics(df_slice[obs_col], df_slice[sim_col])
+                row.extend([f"{r2:.2f}", f"{bias:.2f}", f"{rmse:.2f}"])
+            return row
+            
+        table_rows.append(build_row(merged, "OVERALL (All Years)"))
+        for season in ['Winter', 'Spring', 'Summer', 'Fall']:
+            table_rows.append(build_row(merged[merged['Season'] == season], season))
+            
+        cols = ["Period", "T R²", "T Bias", "T RMSE", "RH R²", "RH Bias", "RH RMSE", "Enth R²", "Enth Bias", "Enth RMSE"]
+        df_table = pd.DataFrame(table_rows, columns=cols)
+        render_table_page(pdf, df_table, f"{stn_name} Data Summary")
 
     # Compile Station Stats to send back
     station_stats = {
@@ -975,15 +1076,31 @@ def process_station(worker_payload):
         station_stats[f'{key}_Bias'] = np.mean(merged[sim_col] - merged[obs_col])
         station_stats[f'{key}_R2'] = r2_score(merged[obs_col], merged[sim_col])
 
-    return stn_name, merged, station_stats
+    # To save RAM, convert float64 to float32 before sending to main thread
+    for col in merged.select_dtypes(include=['float64']).columns:
+        merged[col] = merged[col].astype('float32')
+
+    return stn_name, merged, df_extremes, bad_years, station_stats
 
 # ==========================================
 # MAIN EXECUTION THREAD
 # ==========================================
 if __name__ == '__main__':
-    print("Loading extracted JSON dataset...")
-    with open(JSON_DATA_PATH, 'r') as jf:
-        all_nldas_data = json.load(jf)
+    print(f"Loading extracted JSON datasets from {JSON_DATA_DIR}...")
+    
+    # Read and merge all yearly checkpoints dynamically
+    all_nldas_data = {}
+    json_files = glob.glob(os.path.join(JSON_DATA_DIR, '*_extracted.json'))
+    
+    for jf_path in json_files:
+        with open(jf_path, 'r') as jf:
+            year_data = json.load(jf)
+            for stn, stn_data in year_data.items():
+                if stn not in all_nldas_data:
+                    all_nldas_data[stn] = {}
+                all_nldas_data[stn].update(stn_data)
+
+    print(f"Data loaded for {len(all_nldas_data)} stations.")
 
     station_payloads = []
     for stn_name in all_nldas_data.keys():
@@ -992,6 +1109,8 @@ if __name__ == '__main__':
             station_payloads.append((stn_name, stn_file, all_nldas_data[stn_name], OUTPUT_DIR))
 
     master_df_list = []
+    all_extremes = []
+    all_bad_years = []
     all_stats = []
 
     max_cores = min(multiprocessing.cpu_count(), len(station_payloads), 32)
@@ -1000,58 +1119,62 @@ if __name__ == '__main__':
     with ProcessPoolExecutor(max_workers=max_cores) as executor:
         futures = [executor.submit(process_station, payload) for payload in station_payloads]
         for i, future in enumerate(as_completed(futures)):
-            stn_name, merged_df, stats = future.result()
-            if merged_df is not None:
-                master_df_list.append(merged_df)
-                all_stats.append(stats)
+            stn_name, merged_df, df_ext, bad_yrs, stats = future.result()
+            
+            if merged_df is not None: master_df_list.append(merged_df)
+            if df_ext is not None and not df_ext.empty: all_extremes.append(df_ext)
+            if bad_yrs: all_bad_years.extend(bad_yrs)
+            if stats is not None: all_stats.append(stats)
+                
             print(f"Processed {i+1}/{len(station_payloads)}: {stn_name}", end='\r')
 
-    print("\n\n" + "="*70)
-    print("           COMPREHENSIVE SUMMARY REPORT")
-    print("="*70)
+    # SAVE QAQC CSVs
+    print("\n\nSaving QA/QC tracking files...")
+    if all_extremes:
+        pd.concat(all_extremes).to_csv(os.path.join(OUTPUT_DIR, 'extreme_values_tracked.csv'), index=False)
+    if all_bad_years:
+        pd.DataFrame(all_bad_years).to_csv(os.path.join(OUTPUT_DIR, 'dropped_rh_years.csv'), index=False)
 
-    # Build Global Datasets
-    stats_df = pd.DataFrame(all_stats)
-    global_df = pd.concat(master_df_list, ignore_index=True)
-
-    # Global Bias Calculations
-    global_t_bias = np.mean(global_df['T_C_sim'] - global_df['T_C_obs'])
-    global_rh_bias = np.mean(global_df['RH_derived'] - global_df['RH_obs'])
-    global_ent_bias = np.mean(global_df['Enthalpy_kJ_kg_sim'] - global_df['Enthalpy_kJ_kg_obs'])
-
-    avg_miss_t = stats_df['Missing_T_Pct'].mean()
-    avg_miss_rh = stats_df['Missing_RH_Pct'].mean()
-    missing_08_10_count = stats_df['Missing_08_10_RH'].sum()
-
-    print(f"NLDAS3 indicates an average {compute_bias_str(global_t_bias, '°C')} bias for temperature.")
-    print(f"NLDAS3 indicates an average {compute_bias_str(global_rh_bias, '%')} bias for relative humidity.")
-    print(f"Enthalpy average bias is estimated at a {compute_bias_str(global_ent_bias, ' kJ/kg')} (assuming constant surface pressure of sea level correct error propagation).")
-    
-    print(f"\nMissing data for temperatures is at about ~{avg_miss_t:.1f}% and ~{avg_miss_rh:.1f}% for humidity per station for all stations.")
-    print(f"Missing all the data between 2008 - 2010 for relative humidity (less than 15% of total dataset) for {missing_08_10_count} stations.")
-    print("Current strategy: dropped missing values from weather stations (inner join).")
-    print("Inspected for reasonable distributions across all values for hourly values:")
-    print("  - Temperature between -40 and 50 °C")
-    print("  - Relative humidity between 0 and 100 %")
-
-    # State-by-State Aggregation
-    print("\n--- BIAS & R² BY STATE ---")
-    state_gb = stats_df.groupby('State').agg({
-        'T_C_Bias': 'mean', 'T_C_R2': 'mean',
-        'RH_Bias': 'mean', 'RH_R2': 'mean',
-        'Enthalpy_Bias': 'mean', 'Enthalpy_R2': 'mean',
-        'Station': 'count'
-    }).rename(columns={'Station': 'Station Count'})
-    
-    # Format and print the state table nicely
-    print(f"{'State':<6} | {'Count':<5} | {'Temp Bias (°C)':<15} | {'RH Bias (%)':<15} | {'Enthal Bias (kJ/kg)':<20}")
-    print("-" * 70)
-    for state, row in state_gb.iterrows():
-        t_bias_str = f"{row['T_C_Bias']:+.2f}"
-        rh_bias_str = f"{row['RH_Bias']:+.2f}"
-        ent_bias_str = f"{row['Enthalpy_Bias']:+.2f}"
-        print(f"{state:<6} | {int(row['Station Count']):<5} | {t_bias_str:<15} | {rh_bias_str:<15} | {ent_bias_str:<20}")
+    # ==========================================
+    # MASTER AGGREGATION PDF
+    # ==========================================
+    if master_df_list:
+        print("Generating Master Aggregation PDF...")
+        global_df = pd.concat(master_df_list, ignore_index=True)
+        stats_df = pd.DataFrame(all_stats)
         
-    print("\nOutputs Generated in", OUTPUT_DIR)
-    print("  - Individual Station Plot PDFs (Overall Scatter + 2018 Seasonal Timeseries)")
-    print("  - Missing Timestamps CSVs (for QA/QC tracking)")
+        master_pdf_path = os.path.join(OUTPUT_DIR, "ALL_STATIONS_MASTER_SUMMARY.pdf")
+        
+        def get_agg_row(df, label):
+            row = [label, len(df['Station'].unique())]
+            for obs_col, sim_col, _, _ in VARS_TO_PLOT:
+                r2, bias, rmse = calc_metrics(df[obs_col], df[sim_col])
+                row.extend([f"{r2:.2f}", f"{bias:.2f}", f"{rmse:.2f}"])
+            return row
+            
+        cols = ["Region/State", "Stations", "T R²", "T Bias", "T RMSE", "RH R²", "RH Bias", "RH RMSE", "Enth R²", "Enth Bias", "Enth RMSE"]
+
+        with PdfPages(master_pdf_path) as pdf:
+            
+            # 1. CONUS Overall Table
+            conus_row = get_agg_row(global_df, "CONUS OVERALL")
+            df_conus = pd.DataFrame([conus_row], columns=cols)
+            render_table_page(pdf, df_conus, "CONUS Global Bias Summary")
+            
+            # 2. State-by-State Table
+            state_rows = []
+            for state, group in global_df.groupby('State'):
+                state_rows.append(get_agg_row(group, state))
+            df_state = pd.DataFrame(state_rows, columns=cols)
+            render_table_page(pdf, df_state, "State-by-State Bias Summary")
+            
+            # 3. Climate Region Table
+            climate_rows = []
+            for clim, group in global_df.groupby('Climate'):
+                climate_rows.append(get_agg_row(group, clim))
+            df_climate = pd.DataFrame(climate_rows, columns=cols)
+            render_table_page(pdf, df_climate, "Climate Region Bias Summary")
+            
+        print("\nAll operations complete! Check the output directory for your PDFs and CSVs.")
+    else:
+        print("\n[WARNING] No valid data found to generate master summary.")
