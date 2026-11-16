@@ -799,19 +799,24 @@ warnings.filterwarnings('ignore')
 # ==========================================
 NLDAS_DIR = '/discover/nobackup/projects/eis_nldas3/DATA/forcing/hourly'
 STATION_DIR = '/discover/nobackup/cmbreen/datacenters/uscrn_independent_data'
-
 OUTPUT_DIR = './nldas_station_reports_sequential'
-INTERMEDIATE_DIR = os.path.join(OUTPUT_DIR, 'yearly_checkpoints_ALL')
-FINAL_JSON = os.path.join(OUTPUT_DIR, 'PRIORITY_STATIONS_NLDAS.json')
+INTERMEDIATE_DIR = os.path.join(OUTPUT_DIR, 'yearly_checkpoints_ALLUSCRNdata')
+
+# List of areas to prioritize (duplicates removed)
+PRIORITY_STATES = ['TX', 'IL', 'OH', 'VA', 'IA', 'NC', 'NM', 'NE']
+prioritize = False 
+
+# Dynamic naming so you don't accidentally overwrite your priority JSON!
+if prioritize:
+    FINAL_JSON = os.path.join(OUTPUT_DIR, 'PRIORITY_STATIONS_NLDAS.json')
+else:
+    FINAL_JSON = os.path.join(OUTPUT_DIR, 'ALL_STATIONS_NLDAS.json')
 
 os.makedirs(INTERMEDIATE_DIR, exist_ok=True)
 
 NLDAS_TMP = 'Tair'      
 NLDAS_SPFH = 'Qair'    
 NLDAS_PSURF = 'PSurf'
-
-# List of areas to prioritize (duplicates removed)
-PRIORITY_STATES = ['TX', 'IL', 'OH', 'VA', 'IA', 'NC', 'NM', 'NE']
 
 # SLURM-aware CPU Count
 slurm_cpus = os.environ.get('SLURM_CPUS_PER_TASK')
@@ -821,17 +826,23 @@ else:
     NUM_WORKERS = max(1, cpu_count() - 2)
 
 # ==========================================
-# 1. GATHER PRIORITY STATION COORDINATES
+# 1. GATHER STATION COORDINATES
 # ==========================================
-print(f"Gathering station coordinates for priority states: {PRIORITY_STATES}...")
 all_station_files = [f for f in glob.glob(os.path.join(STATION_DIR, '*.csv')) if not os.path.basename(f).startswith('all_')]
 
-station_files = []
-for f in all_station_files:
-    base = os.path.basename(f)
-    if any(base.startswith(f"{state}_") for state in PRIORITY_STATES):
-        station_files.append(f)
+station_files = [] # <-- FIX 1: We must define this empty list first!
 
+if prioritize: 
+    print(f"Gathering station coordinates for priority states: {PRIORITY_STATES}...")
+    for f in all_station_files:
+        base = os.path.basename(f)
+        if any(base.startswith(f"{state}_") for state in PRIORITY_STATES):
+            station_files.append(f)
+else:
+    print("Gathering ALL station coordinates across the USCRN network...")
+    station_files = all_station_files # Just use the whole list!
+
+# <-- FIX 2: UN-INDENTED this block so it runs regardless of True/False
 station_meta = []
 for stn_file in station_files:
     stn_name = os.path.basename(stn_file).replace('.csv', '')
@@ -845,7 +856,7 @@ for stn_file in station_files:
 
 df_meta = pd.DataFrame(station_meta)
 stn_names = df_meta['Station'].values
-print(f"Found {len(df_meta)} valid stations matching priority states.")
+print(f"Found {len(df_meta)} valid stations.")
 
 # ==========================================
 # 2. FIND & BATCH NLDAS FILES BY YEAR
