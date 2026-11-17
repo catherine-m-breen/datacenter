@@ -1808,8 +1808,8 @@ not printing negative values for the main summary pdf
 
 if this gets slow, we can add the elevation to the uscrn data directly 
 
+fixed a one-way stat
 '''
-
 import os
 import glob
 import json
@@ -2089,7 +2089,7 @@ def process_station(worker_payload):
         df_table = pd.DataFrame(table_rows, columns=cols)
         render_table_page(pdf, df_table, f"{stn_name} Data Summary")
 
-    station_stats = {
+    stn_stats_dict = {
         'Station': stn_name,
         'State': state,
         'Total_Records': total_records,
@@ -2102,13 +2102,13 @@ def process_station(worker_payload):
     for (obs_col, sim_col, _, key) in VARS_TO_PLOT:
         clean_merged = merged.dropna(subset=[obs_col, sim_col])
         if len(clean_merged) > 0:
-            station_stats[f'{key}_Bias'] = np.mean(clean_merged[sim_col] - clean_merged[obs_col])
-            station_stats[f'{key}_R2'] = r2_score(clean_merged[obs_col], clean_merged[sim_col])
+            stn_stats_dict[f'{key}_Bias'] = np.mean(clean_merged[sim_col] - clean_merged[obs_col])
+            stn_stats_dict[f'{key}_R2'] = r2_score(clean_merged[obs_col], clean_merged[sim_col])
 
     for col in merged.select_dtypes(include=['float64']).columns:
         merged[col] = merged[col].astype('float32')
 
-    return stn_name, merged, df_extremes, bad_years, station_stats
+    return stn_name, merged, df_extremes, bad_years, stn_stats_dict
 
 # ==========================================
 # MAIN EXECUTION THREAD
@@ -2146,12 +2146,13 @@ if __name__ == '__main__':
     with ProcessPoolExecutor(max_workers=max_cores) as executor:
         futures = [executor.submit(process_station, payload) for payload in station_payloads]
         for i, future in enumerate(as_completed(futures)):
-            stn_name, merged_df, df_ext, bad_yrs, stats = future.result()
+            # RENAMED stats to stn_stats to prevent shadowing scipy.stats!
+            stn_name, merged_df, df_ext, bad_yrs, stn_stats = future.result()
             
             if merged_df is not None: master_df_list.append(merged_df)
             if df_ext is not None and not df_ext.empty: all_extremes.append(df_ext)
             if bad_yrs: all_bad_years.extend(bad_yrs)
-            if stats is not None: all_stats.append(stats)
+            if stn_stats is not None: all_stats.append(stn_stats)
                 
             print(f"Processed {i+1}/{len(station_payloads)}: {stn_name}", end='\r')
 
@@ -2253,11 +2254,9 @@ if __name__ == '__main__':
             for obs_col, sim_col, title, _ in VARS_TO_PLOT:
                 clean = global_df.dropna(subset=[obs_col, sim_col])
                 if len(clean) > 20:
-                    # Find thresholds based on observations
                     p05 = clean[obs_col].quantile(0.05)
                     p95 = clean[obs_col].quantile(0.95)
                     
-                    # Filter into bottom and top subsets
                     bot_df = clean[clean[obs_col] <= p05]
                     top_df = clean[clean[obs_col] >= p95]
                     
@@ -2332,5 +2331,3 @@ if __name__ == '__main__':
         
     else:
         print("\n[WARNING] No valid data found to generate master summary.")
-
-
