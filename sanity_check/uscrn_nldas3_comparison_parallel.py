@@ -1810,14 +1810,12 @@ if this gets slow, we can add the elevation to the uscrn data directly
 
 fixed a one-way stat
 '''
+
 import os
 import glob
 import json
 import pandas as pd
 import numpy as np
-import requests
-import random
-import time
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from sklearn.metrics import mean_squared_error, r2_score
@@ -1842,7 +1840,6 @@ VARS_TO_PLOT = [('T_C_obs', 'T_C_sim', 'Temp (°C)', 'T_C'),
 
 TARGET_TS_YEARS = [2005, 2010, 2015, 2020, 2025]
 
-# Standard US Climate Regions Mapping
 STATE_TO_CLIMATE = {
     'WA': 'PNW', 'OR': 'PNW', 'ID': 'PNW',
     'IL': 'Midwest', 'IN': 'Midwest', 'IA': 'Midwest', 'MI': 'Midwest', 'MN': 'Midwest', 'OH': 'Midwest', 'WI': 'Midwest',
@@ -1856,29 +1853,19 @@ STATE_TO_CLIMATE = {
 # ==========================================
 # HELPER FUNCTIONS
 # ==========================================
-def get_elevation(lat, lon):
-    """Fetches elevation from Open-Meteo with a slight delay to avoid rate limiting in parallel."""
-    time.sleep(random.uniform(0.1, 0.5))
-    try:
-        url = f"https://api.open-meteo.com/v1/elevation?latitude={lat}&longitude={lon}"
-        r = requests.get(url, timeout=10)
-        if r.status_code == 200:
-            return float(r.json()['elevation'][0])
-    except Exception:
-        pass
-    return 0.0  # Fallback to sea level if the API call fails
-
-def calc_psychrometrics(df, source='station', elevation_m=0):
-    """Calculates psychrometrics dynamically adjusted for station elevation."""
-    p_hpa_local = 1013.25 * (1 - 2.25577e-5 * elevation_m)**5.25588
+def calc_psychrometrics(df, source='station'):
+    """Calculates psychrometrics. NLDAS uses its own Psurf if available."""
     e_s = 6.112 * np.exp((17.67 * df['T_C']) / (df['T_C'] + 243.5))
     
     if source == 'nldas':
-        e = (df['Q_kg_kg'] * p_hpa_local) / (0.622 + 0.378 * df['Q_kg_kg'])
+        p_hpa = df['P_hPa'] if 'P_hPa' in df.columns else 1013.25
+        e = (df['Q_kg_kg'] * p_hpa) / (0.622 + 0.378 * df['Q_kg_kg'])
         df['RH_derived'] = np.clip(100.0 * (e / e_s), 0, 100)
+        
     elif source == 'station':
+        p_hpa = 1013.25  
         e = e_s * (df['RH_obs'] / 100.0)
-        df['Q_derived'] = (0.622 * e) / (p_hpa_local - 0.378 * e)
+        df['Q_derived'] = (0.622 * e) / (p_hpa - 0.378 * e)
         df['Q_kg_kg'] = df['Q_derived'] 
         
     df['Enthalpy_kJ_kg'] = 1.006 * df['T_C'] + df['Q_kg_kg'] * (2501 + 1.86 * df['T_C'])
@@ -1907,10 +1894,8 @@ def render_table_page(pdf, df, title):
     table.set_fontsize(10)
     table.scale(1, 1.5)
     
-    # Bold the headers
     for (row, col), cell in table.get_celld().items():
-        if row == 0:
-            cell.set_text_props(weight='bold')
+        if row == 0: cell.set_text_props(weight='bold')
             
     fig.suptitle(title, fontsize=16, fontweight='bold')
     plt.tight_layout()
@@ -1925,18 +1910,11 @@ def process_station(worker_payload):
     state = stn_name.split('_')[0]
     climate = STATE_TO_CLIMATE.get(state, 'Unknown')
     
-    # 1. LOAD OBSERVATIONS & IDENTIFY EXTREMES
+    # 1. LOAD OBSERVATIONS 
     df_stn = pd.read_csv(stn_file)
     df_stn = df_stn.rename(columns={'temperature': 'T_C', 'relative_humidity': 'RH_obs'})
     df_stn['T_C'] = pd.to_numeric(df_stn['T_C'], errors='coerce')
     df_stn['RH_obs'] = pd.to_numeric(df_stn['RH_obs'], errors='coerce')
-    
-    lat = df_stn['latitude'].dropna().iloc[0] if 'latitude' in df_stn.columns and not df_stn['latitude'].dropna().empty else np.nan
-    lon = df_stn['longitude'].dropna().iloc[0] if 'longitude' in df_stn.columns and not df_stn['longitude'].dropna().empty else np.nan
-    
-    elevation_m = 0.0
-    if pd.notna(lat) and pd.notna(lon):
-        elevation_m = get_elevation(lat, lon)
     
     total_records = len(df_stn)
     raw_missing_t = df_stn['T_C'].isna().sum()
@@ -1963,22 +1941,33 @@ def process_station(worker_payload):
     df_stn.loc[ext_mask_RH, 'RH_obs'] = np.nan
     
     df_stn = df_stn.set_index('datetime')
-    df_stn = calc_psychrometrics(df_stn, source='station', elevation_m=elevation_m)
+    df_stn = calc_psychrometrics(df_stn, source='station')
     
-    # 2. PARSE NLDAS JSON
+    # 2. PARSE NLDAS JSON (Now grabbing PSurf!)
     records = []
     for ym, days in stn_json_data.items():
         for date_str, data_dict in days.items():
             base_dt = pd.to_datetime(date_str, format="%Y%m%d")
+            has_psurf = 'psurf' in data_dict
             for h in range(len(data_dict['tair'])):
-                records.append({'datetime': base_dt + pd.Timedelta(hours=h), 'Tair': data_dict['tair'][h], 'Qair': data_dict['qair'][h]})
+                rec = {
+                    'datetime': base_dt + pd.Timedelta(hours=h), 
+                    'Tair': data_dict['tair'][h], 
+                    'Qair': data_dict['qair'][h]
+                }
+                if has_psurf:
+                    rec['Psurf'] = data_dict['psurf'][h]
+                records.append(rec)
                 
     if not records: return stn_name, None, df_extremes, [], None
         
     df_nldas = pd.DataFrame(records).set_index('datetime')
     df_nldas['T_C'] = df_nldas['Tair'] - 273.15 if df_nldas['Tair'].mean() > 200 else df_nldas['Tair']
     df_nldas['Q_kg_kg'] = df_nldas['Qair']
-    df_nldas = calc_psychrometrics(df_nldas, source='nldas', elevation_m=elevation_m)
+    if 'Psurf' in df_nldas.columns:
+        df_nldas['P_hPa'] = df_nldas['Psurf'] / 100.0  # Convert Pa to hPa
+        
+    df_nldas = calc_psychrometrics(df_nldas, source='nldas')
     
     # 3. MERGE & QAQC
     merged = df_stn[['T_C', 'RH_obs', 'Enthalpy_kJ_kg']].join(
@@ -2021,7 +2010,7 @@ def process_station(worker_payload):
             yr2 = years[i+1] if i+1 < len(years) else None
             
             fig, axes = plt.subplots(3, 2, figsize=(12, 14))
-            fig.suptitle(f"Yearly Scatter Comparisons: {stn_name}\nElevation: {elevation_m:.1f} m", fontsize=16, fontweight='bold')
+            fig.suptitle(f"Yearly Scatter Comparisons: {stn_name}", fontsize=16, fontweight='bold')
             
             for col, yr in enumerate([yr1, yr2]):
                 if yr is None:
@@ -2095,8 +2084,7 @@ def process_station(worker_payload):
         'Total_Records': total_records,
         'Missing_T_Pct': (raw_missing_t / total_records) * 100,
         'Missing_RH_Pct': (raw_missing_rh / total_records) * 100,
-        'Missing_08_10_RH': is_missing_08_10,
-        'Elevation_m': elevation_m
+        'Missing_08_10_RH': is_missing_08_10
     }
     
     for (obs_col, sim_col, _, key) in VARS_TO_PLOT:
@@ -2146,7 +2134,6 @@ if __name__ == '__main__':
     with ProcessPoolExecutor(max_workers=max_cores) as executor:
         futures = [executor.submit(process_station, payload) for payload in station_payloads]
         for i, future in enumerate(as_completed(futures)):
-            # RENAMED stats to stn_stats to prevent shadowing scipy.stats!
             stn_name, merged_df, df_ext, bad_yrs, stn_stats = future.result()
             
             if merged_df is not None: master_df_list.append(merged_df)
@@ -2186,10 +2173,22 @@ if __name__ == '__main__':
 
         with PdfPages(master_pdf_path) as pdf:
             
+            # --- DIAGNOSTIC PRINT BLOCK ---
+            print("\n--- DIAGNOSTICS FOR GLOBAL SCATTER PLOTS ---")
+            for obs_col, sim_col, title, _ in VARS_TO_PLOT:
+                clean = global_df.dropna(subset=[obs_col, sim_col])
+                neg_obs = (clean[obs_col] < 0).sum()
+                neg_sim = (clean[sim_col] < 0).sum()
+                print(f"Variable: {title}")
+                print(f"  Total valid points: {len(clean):,}")
+                print(f"  Obs < 0 count: {neg_obs:,} | Min Obs: {clean[obs_col].min():.2f} | Max Obs: {clean[obs_col].max():.2f}")
+                print(f"  Sim < 0 count: {neg_sim:,} | Min Sim: {clean[sim_col].min():.2f} | Max Sim: {clean[sim_col].max():.2f}")
+            print("--------------------------------------------\n")
+            
             # --- 1. OVERALL SCATTER PLOT ---
             print("  -> Plotting Global Scatter (100% Full Data)...")
             fig, axes = plt.subplots(1, 3, figsize=(18, 6))
-            fig.suptitle("Global CONUS Scatter Plots (Full Dataset - Elevation Corrected)", fontsize=18, fontweight='bold', y=1.02)
+            fig.suptitle("Global CONUS Scatter Plots (Full Dataset - NLDAS Psurf Corrected)", fontsize=18, fontweight='bold', y=1.02)
             
             for ax, (obs_col, sim_col, title, _) in zip(axes, VARS_TO_PLOT):
                 clean = global_df.dropna(subset=[obs_col, sim_col])
@@ -2199,9 +2198,10 @@ if __name__ == '__main__':
                     
                     mn, mx = min(obs.min(), sim.min()), max(obs.max(), sim.max())
                     
-                    hb = ax.hexbin(obs, sim, gridsize=100, cmap='turbo', mincnt=1, bins='log', extent=(mn, mx, mn, mx))
+                    # Removed bins='log' so sparse dots don't vanish
+                    hb = ax.hexbin(obs, sim, gridsize=100, cmap='turbo', mincnt=1, extent=(mn, mx, mn, mx))
                     cb = plt.colorbar(hb, ax=ax)
-                    cb.set_label('log10(count)')
+                    cb.set_label('Count')
                     
                     ax.plot([mn, mx], [mn, mx], 'black', linestyle='--', lw=2, label='1:1 Line')
                     ax.set_xlim(mn, mx); ax.set_ylim(mn, mx)
