@@ -458,7 +458,10 @@ pulling nldas3 for all datacenters (which we will later match to tmy)
 
 bounding box at 15 km by 15 km 
 
+organizes them into states at the end 
+
 '''
+
 import os
 import glob
 import numpy as np
@@ -508,22 +511,22 @@ NUM_WORKERS = int(slurm_cpus) if slurm_cpus else max(1, cpu_count() - 2)
 print("Gathering datacenter coordinates from IM3 Atlas...")
 df_dc = pd.read_csv(DATACENTER_CSV)
 
-# Filter by TARGET_STATES if the list is not empty
 if TARGET_STATES:
     df_dc = df_dc[df_dc['state_abb'].isin(TARGET_STATES)].copy()
 
-# Map to the format expected by the rest of the script
 df_meta = pd.DataFrame({
-    'Station': df_dc['id'].astype(str),  # Using the 'id' column as the unique identifier
+    'Station': df_dc['id'].astype(str),
     'State': df_dc['state_abb'],
     'lat': df_dc['lat'],
     'lon': df_dc['lon']
 })
 
 stn_names = df_meta['Station'].values
+# Create a quick lookup dictionary to map station IDs to their states
+stn_to_state = dict(zip(df_meta['Station'], df_meta['State']))
+
 print(f"Total datacenters found for processing: {len(df_meta)}")
 
-# Create checkpoint folders for each station
 for stn in stn_names:
     os.makedirs(os.path.join(INTERMEDIATE_DIR, str(stn)), exist_ok=True)
 
@@ -551,7 +554,6 @@ with xr.open_dataset(nldas_files[0], engine='netcdf4') as ds_ref:
     grid_lats = ds_ref[lat_var].values
     grid_lons = ds_ref[lon_var].values
 
-# 1 degree is ~111 km. 7.5 km in all directions gives a 15x15 box.
 DEG_BUFFER = 7.5 / 111.0 
 stn_boxes = {}
 
@@ -583,7 +585,6 @@ for _, row in df_meta.iterrows():
 def process_single_year(batch_data):
     year, files = batch_data
     
-    # CHECKPOINT 1: See if this year is already done for all stations
     all_done = True
     for stn in stn_names:
         chk_file = os.path.join(INTERMEDIATE_DIR, str(stn), f"{year}.pkl")
@@ -592,9 +593,8 @@ def process_single_year(batch_data):
             break
             
     if all_done:
-        return year, True # True flags that we loaded from checkpoint
+        return year, True 
     
-    # Initialize dictionary
     year_results = {stn: {'times': []} for stn in stn_names}
     for stn in stn_names:
         for v in VARS_TO_EXTRACT.keys():
@@ -618,7 +618,6 @@ def process_single_year(batch_data):
         except Exception as e:
             continue
             
-    # Save the data to checkpoint files (one per station for this year)
     for stn in stn_names:
         if year_results[stn]['times']:
             stn_year_data = {'times': year_results[stn]['times']}
@@ -648,16 +647,19 @@ if __name__ == '__main__':
 
     print("\nExtraction complete! Assembling stations and calculating Thermodynamics...")
     
-    # Process final netcdfs station by station to save memory
     for stn in stn_names:
-        out_file = os.path.join(OUTPUT_DIR, f"{stn}_NLDAS_Subset.nc")
+        # --- NEW: Create State Subfolder ---
+        state_abbr = stn_to_state[stn]
+        state_dir = os.path.join(OUTPUT_DIR, state_abbr)
+        os.makedirs(state_dir, exist_ok=True)
         
-        # CHECKPOINT 2: Skip assembly if final NetCDF is already generated
+        # Route output file into the new state subfolder
+        out_file = os.path.join(state_dir, f"{stn}_NLDAS_Subset.nc")
+        
         if os.path.exists(out_file):
-            print(f"Final NetCDF for {stn} already exists. Skipping.")
+            print(f"Final NetCDF for {stn} already exists in {state_abbr} folder. Skipping.")
             continue
             
-        # Load all intermediate yearly files for this specific station
         stn_pickles = glob.glob(os.path.join(INTERMEDIATE_DIR, str(stn), "*.pkl"))
         if not stn_pickles:
             print(f"No intermediate data found for {stn}. Skipping.")
@@ -676,11 +678,9 @@ if __name__ == '__main__':
         if not stn_times:
             continue
             
-        # Sort by time just in case files were read out of order
         sort_idx = np.argsort(stn_times)
         times = np.array(stn_times)[sort_idx]
         
-        # Build Xarray Dataset
         ds_vars = {}
         box = stn_boxes[stn]
         
@@ -697,11 +697,10 @@ if __name__ == '__main__':
                 'lat': box['lats'],
                 'lon': box['lons']
             },
-            attrs={'Datacenter_USAF': stn, 'Description': '15x15km NLDAS-3 Subset'}
+            attrs={'Datacenter_USAF': stn, 'State': state_abbr, 'Description': '15x15km NLDAS-3 Subset'}
         )
 
-        # --- CALCULATE THERMODYNAMICS ---
-        print(f"Calculating Wet Bulb and Enthalpy for {stn}...")
+        print(f"Calculating Wet Bulb and Enthalpy for {stn} in {state_abbr}...")
         tair_c = (ds['Tair'].values - 273.15) * units.degC
         psurf_pa = ds['PSurf'].values * units.Pa
         qair = ds['Qair'].values 
@@ -715,7 +714,6 @@ if __name__ == '__main__':
         enthalpy = mpcalc.moist_static_energy(psurf_pa, tair_c, dewpoint).m / 1000
         ds['Enthalpy_kJ_kg'] = (['time', 'lat', 'lon'], enthalpy)
 
-        # --- SAVE NetCDF ---
         ds.to_netcdf(out_file)
         print(f"Saved {out_file}")
 
