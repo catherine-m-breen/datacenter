@@ -189,6 +189,276 @@ we will try to parallelize this across nodes and cpus
 
 '''
 
+# import os
+# import glob
+# import numpy as np
+# import pandas as pd
+# import xarray as xr
+# import netCDF4 as nc
+# import warnings
+# from multiprocessing import Pool, cpu_count
+# from collections import defaultdict
+# import metpy.calc as mpcalc
+# from metpy.units import units
+
+# warnings.filterwarnings('ignore')
+
+# # ==========================================
+# # CONFIGURATION
+# # ==========================================
+# NLDAS_DIR = '/discover/nobackup/projects/eis_nldas3/DATA/forcing/hourly'
+# TMY_BASE_DIR = '/discover/nobackup/cmbreen/datacenters/noaa_tmy_downloads_datacenterslocs/zip'
+# OUTPUT_DIR = '/discover/nobackup/cmbreen/datacenters/nldas_datacenter_subsets'
+
+# TARGET_STATES = ['TX', 'IL', 'OH', 'VA', 'IA', 'NC', 'NM', 'NE']
+# os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+# # NLDAS Variable names 
+# VARS_TO_EXTRACT = {
+#     'Tair': 'Tair',    # K
+#     'Qair': 'Qair',    # kg/kg
+#     'PSurf': 'PSurf',  # Pa
+#     'Rainf': 'Rainf',  # kg m-2 s-1 (mm/s)
+#     'Wind': 'Wind'     # m/s
+# }
+
+# slurm_cpus = os.environ.get('SLURM_CPUS_PER_TASK')
+# NUM_WORKERS = int(slurm_cpus) if slurm_cpus else max(1, cpu_count() - 2)
+
+# # ==========================================
+# # 1. GATHER DATACENTER COORDINATES
+# # ==========================================
+# print("Gathering datacenter coordinates from target states...")
+# station_meta = []
+# for meta_file in glob.glob(f'{TMY_BASE_DIR}/*/*-metadata.csv'):
+#     df_temp = pd.read_csv(meta_file)
+#     state = df_temp['State'].iloc[0]
+    
+#     if state in TARGET_STATES:
+#         station_meta.append({
+#             'Station': df_temp['USAF'].iloc[0], # Using USAF ID as station name
+#             'State': state,
+#             'lat': df_temp['Latitude'].iloc[0],
+#             'lon': df_temp['Longitude'].iloc[0]
+#         })
+
+# df_meta = pd.DataFrame(station_meta)
+# stn_names = df_meta['Station'].values
+# # print(f"Found {len(df_meta)} datacenters in prioritized states.")
+
+# import sys # add this to your imports
+
+# # ==========================================
+# # 1. GATHER DATACENTER COORDINATES
+# # ==========================================
+# # ... [Keep your existing code that builds df_meta] ...
+# print(f"Total datacenters found: {len(df_meta)}")
+
+# # --- NEW: SLURM JOB ARRAY CHUNKING ---
+# CHUNK_SIZE = 100  # Number of datacenters per node
+
+# # Default to 0 if running interactively without an array
+# task_id = int(os.environ.get('SLURM_ARRAY_TASK_ID', 0))
+
+# start_idx = task_id * CHUNK_SIZE
+# end_idx = min(start_idx + CHUNK_SIZE, len(df_meta))
+
+# # Slice the dataframe to only keep this node's datacenters
+# df_meta = df_meta.iloc[start_idx:end_idx]
+
+# if df_meta.empty:
+#     print(f"Task ID {task_id}: No datacenters in this chunk. Exiting.")
+#     sys.exit(0)
+
+# stn_names = df_meta['Station'].values
+# print(f"Node (Task {task_id}) processing datacenters {start_idx} to {end_idx-1} ({len(df_meta)} total).")
+
+
+# # ==========================================
+# # 2. FIND & BATCH NLDAS FILES BY YEAR
+# # ==========================================
+# nldas_files = sorted(glob.glob(os.path.join(NLDAS_DIR, '*', '*.nc')))
+# print(f"Found {len(nldas_files)} NLDAS files.")
+
+# files_by_year = defaultdict(list)
+# for f in nldas_files:
+#     year = os.path.basename(f).split('.')[1][1:5]
+#     files_by_year[year].append(f)
+
+# # ==========================================
+# # 3. PRE-COMPUTE 15x15 KM BOUNDING BOX INDICES
+# # ==========================================
+# print("Pre-computing bounding box grid indices (~15x15 km)...")
+# with xr.open_dataset(nldas_files[0], engine='netcdf4') as ds_ref:
+#     lat_var = 'lat' if 'lat' in ds_ref.coords else 'latitude'
+#     lon_var = 'lon' if 'lon' in ds_ref.coords else 'longitude'
+#     grid_lats = ds_ref[lat_var].values
+#     grid_lons = ds_ref[lon_var].values
+
+# # 1 degree is ~111 km. 7.5 km in all directions gives a 15x15 box.
+# DEG_BUFFER = 7.5 / 111.0 
+# stn_boxes = {}
+
+# for _, row in df_meta.iterrows():
+#     stn = row['Station']
+#     stn_lat, stn_lon = row['lat'], row['lon']
+    
+#     # Boolean masks for lat/lon within buffer
+#     y_mask = (grid_lats >= stn_lat - DEG_BUFFER) & (grid_lats <= stn_lat + DEG_BUFFER)
+#     x_mask = (grid_lons >= stn_lon - DEG_BUFFER) & (grid_lons <= stn_lon + DEG_BUFFER)
+    
+#     # If the point falls directly in the center of a pixel and misses the buffer, force minimum 1 nearest pixel
+#     if not y_mask.any():
+#         y_mask[np.abs(grid_lats - stn_lat).argmin()] = True
+#     if not x_mask.any():
+#         x_mask[np.abs(grid_lons - stn_lon).argmin()] = True
+        
+#     y_indices = np.where(y_mask)[0]
+#     x_indices = np.where(x_mask)[0]
+    
+#     stn_boxes[stn] = {
+#         'y_slice': slice(y_indices[0], y_indices[-1] + 1),
+#         'x_slice': slice(x_indices[0], x_indices[-1] + 1),
+#         'lats': grid_lats[y_indices[0]:y_indices[-1] + 1],
+#         'lons': grid_lons[x_indices[0]:x_indices[-1] + 1]
+#     }
+
+# # ==========================================
+# # 4. YEARLY WORKER FUNCTION
+# # ==========================================
+# def process_single_year(batch_data):
+#     year, files = batch_data
+    
+#     # Initialize dict to hold time-series arrays for this year
+#     year_results = {stn: {'times': []} for stn in stn_names}
+#     for stn in stn_names:
+#         for v in VARS_TO_EXTRACT.keys():
+#             year_results[stn][v] = []
+
+#     for f in files:
+#         try:
+#             basename = os.path.basename(f)
+#             # Example: NLDAS_FOR0010_H.A20010101.030.beta.nc
+#             date_str = basename.split('.')[1][1:] # '20010101'
+#             hour_str = basename.split('.')[2][:2] # '03'
+#             dt = pd.to_datetime(f"{date_str}{hour_str}", format="%Y%m%d%H")
+            
+#             with nc.Dataset(f, 'r') as root:
+#                 for stn in stn_names:
+#                     box = stn_boxes[stn]
+#                     year_results[stn]['times'].append(dt)
+                    
+#                     for var_name, nc_var in VARS_TO_EXTRACT.items():
+#                         # Extract the slice: [time, lat_slice, lon_slice]
+#                         data_slice = root.variables[nc_var][:, box['y_slice'], box['x_slice']].filled(np.nan)
+#                         year_results[stn][var_name].append(data_slice)
+#         except Exception as e:
+#             continue
+            
+#     # Concatenate the lists along the time axis
+#     for stn in stn_names:
+#         if year_results[stn]['times']:
+#             for v in VARS_TO_EXTRACT.keys():
+#                 year_results[stn][v] = np.concatenate(year_results[stn][v], axis=0)
+                
+#     return year, year_results
+
+# # ==========================================
+# # 5. EXECUTE BATCHES & ASSEMBLE NetCDF
+# # ==========================================
+# if __name__ == '__main__':
+#     print(f"\nStarting extraction on {NUM_WORKERS} cores...")
+    
+#     # Prepare master storage dict
+#     master_data = {stn: {'times': []} for stn in stn_names}
+#     for stn in stn_names:
+#         for v in VARS_TO_EXTRACT.keys():
+#             master_data[stn][v] = []
+
+#     tasks = list(files_by_year.items())
+    
+#     with Pool(processes=NUM_WORKERS) as pool:
+#         for year, year_results in pool.imap_unordered(process_single_year, tasks):
+#             print(f"Finished extracting year: {year}")
+#             for stn in stn_names:
+#                 if year_results[stn]['times']:
+#                     master_data[stn]['times'].extend(year_results[stn]['times'])
+#                     master_data[stn][v].append(year_results[stn][v])
+
+#     print("\nExtraction complete! Calculating Thermodynamics and saving NetCDFs...")
+    
+#     for stn in stn_names:
+#         times = master_data[stn]['times']
+#         if not times:
+#             continue
+            
+#         # Sort by time just in case unordered multiprocessing mixed them up
+#         sort_idx = np.argsort(times)
+#         times = np.array(times)[sort_idx]
+        
+#         # Build Xarray Dataset
+#         ds_vars = {}
+#         box = stn_boxes[stn]
+        
+#         for v in VARS_TO_EXTRACT.keys():
+#             # Stack the yearly blocks together and sort by time
+#             arr = np.concatenate(master_data[stn][v], axis=0)[sort_idx]
+            
+#             # Precip fix: convert kg m-2 s-1 to mm/hour (multiply by 3600)
+#             if v == 'Rainf':
+#                 arr = arr * 3600
+                
+#             ds_vars[v] = (['time', 'lat', 'lon'], arr)
+            
+#         ds = xr.Dataset(
+#             data_vars=ds_vars,
+#             coords={
+#                 'time': times,
+#                 'lat': box['lats'],
+#                 'lon': box['lons']
+#             },
+#             attrs={'Datacenter_USAF': stn, 'Description': '15x15km NLDAS-3 Subset'}
+#         )
+
+#         # --- CALCULATE THERMODYNAMICS ---
+#         print(f"Calculating Wet Bulb and Enthalpy for {stn}...")
+        
+#         # Flatten spatial dimensions for MetPy calculations
+#         tair_c = (ds['Tair'].values - 273.15) * units.degC
+#         psurf_pa = ds['PSurf'].values * units.Pa
+#         qair = ds['Qair'].values # dimensionless (kg/kg)
+        
+#         # Calculate Relative Humidity from Specific Humidity
+#         rh = mpcalc.relative_humidity_from_specific_humidity(psurf_pa, tair_c, qair)
+        
+#         # Calculate Dew Point
+#         dewpoint = mpcalc.dewpoint_from_relative_humidity(tair_c, rh)
+        
+#         # Wet Bulb Temperature
+#         wet_bulb = mpcalc.wet_bulb_temperature(psurf_pa, tair_c, dewpoint).m
+#         ds['Wet_Bulb_C'] = (['time', 'lat', 'lon'], wet_bulb)
+        
+#         # Moist Enthalpy (approximate moist static energy in kJ/kg)
+#         enthalpy = mpcalc.moist_static_energy(psurf_pa, tair_c, dewpoint).m / 1000
+#         ds['Enthalpy_kJ_kg'] = (['time', 'lat', 'lon'], enthalpy)
+
+#         # --- SAVE NetCDF ---
+#         out_file = os.path.join(OUTPUT_DIR, f"{stn}_NLDAS_Subset.nc")
+#         ds.to_netcdf(out_file)
+#         print(f"Saved {out_file}")
+
+#     print("All tasks complete!")
+
+'''
+
+take 3: cut the nodes assign different years to different cores 
+do it for priority states first then all states 
+
+pulling nldas3 for all datacenters (which we will later match to tmy)
+
+bounding box at 15 km by 15 km 
+
+'''
 import os
 import glob
 import numpy as np
@@ -196,6 +466,7 @@ import pandas as pd
 import xarray as xr
 import netCDF4 as nc
 import warnings
+import pickle
 from multiprocessing import Pool, cpu_count
 from collections import defaultdict
 import metpy.calc as mpcalc
@@ -207,11 +478,17 @@ warnings.filterwarnings('ignore')
 # CONFIGURATION
 # ==========================================
 NLDAS_DIR = '/discover/nobackup/projects/eis_nldas3/DATA/forcing/hourly'
-TMY_BASE_DIR = '/discover/nobackup/cmbreen/datacenters/noaa_tmy_downloads_datacenterslocs/zip'
+DATACENTER_CSV = '/discover/nobackup/cmbreen/datacenters/data/im3_open_source_data_center_atlas_v2026.02.09.csv'
 OUTPUT_DIR = '/discover/nobackup/cmbreen/datacenters/nldas_datacenter_subsets'
 
+# To run ALL states later, just change this to an empty list: TARGET_STATES = []
 TARGET_STATES = ['TX', 'IL', 'OH', 'VA', 'IA', 'NC', 'NM', 'NE']
+
+# Checkpoint directory
+INTERMEDIATE_DIR = os.path.join(OUTPUT_DIR, 'intermediate_yearly_checkpoints')
+
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(INTERMEDIATE_DIR, exist_ok=True)
 
 # NLDAS Variable names 
 VARS_TO_EXTRACT = {
@@ -228,51 +505,27 @@ NUM_WORKERS = int(slurm_cpus) if slurm_cpus else max(1, cpu_count() - 2)
 # ==========================================
 # 1. GATHER DATACENTER COORDINATES
 # ==========================================
-print("Gathering datacenter coordinates from target states...")
-station_meta = []
-for meta_file in glob.glob(f'{TMY_BASE_DIR}/*/*-metadata.csv'):
-    df_temp = pd.read_csv(meta_file)
-    state = df_temp['State'].iloc[0]
-    
-    if state in TARGET_STATES:
-        station_meta.append({
-            'Station': df_temp['USAF'].iloc[0], # Using USAF ID as station name
-            'State': state,
-            'lat': df_temp['Latitude'].iloc[0],
-            'lon': df_temp['Longitude'].iloc[0]
-        })
+print("Gathering datacenter coordinates from IM3 Atlas...")
+df_dc = pd.read_csv(DATACENTER_CSV)
 
-df_meta = pd.DataFrame(station_meta)
-stn_names = df_meta['Station'].values
-# print(f"Found {len(df_meta)} datacenters in prioritized states.")
+# Filter by TARGET_STATES if the list is not empty
+if TARGET_STATES:
+    df_dc = df_dc[df_dc['state_abb'].isin(TARGET_STATES)].copy()
 
-import sys # add this to your imports
-
-# ==========================================
-# 1. GATHER DATACENTER COORDINATES
-# ==========================================
-# ... [Keep your existing code that builds df_meta] ...
-print(f"Total datacenters found: {len(df_meta)}")
-
-# --- NEW: SLURM JOB ARRAY CHUNKING ---
-CHUNK_SIZE = 100  # Number of datacenters per node
-
-# Default to 0 if running interactively without an array
-task_id = int(os.environ.get('SLURM_ARRAY_TASK_ID', 0))
-
-start_idx = task_id * CHUNK_SIZE
-end_idx = min(start_idx + CHUNK_SIZE, len(df_meta))
-
-# Slice the dataframe to only keep this node's datacenters
-df_meta = df_meta.iloc[start_idx:end_idx]
-
-if df_meta.empty:
-    print(f"Task ID {task_id}: No datacenters in this chunk. Exiting.")
-    sys.exit(0)
+# Map to the format expected by the rest of the script
+df_meta = pd.DataFrame({
+    'Station': df_dc['id'].astype(str),  # Using the 'id' column as the unique identifier
+    'State': df_dc['state_abb'],
+    'lat': df_dc['lat'],
+    'lon': df_dc['lon']
+})
 
 stn_names = df_meta['Station'].values
-print(f"Node (Task {task_id}) processing datacenters {start_idx} to {end_idx-1} ({len(df_meta)} total).")
+print(f"Total datacenters found for processing: {len(df_meta)}")
 
+# Create checkpoint folders for each station
+for stn in stn_names:
+    os.makedirs(os.path.join(INTERMEDIATE_DIR, str(stn)), exist_ok=True)
 
 # ==========================================
 # 2. FIND & BATCH NLDAS FILES BY YEAR
@@ -282,8 +535,11 @@ print(f"Found {len(nldas_files)} NLDAS files.")
 
 files_by_year = defaultdict(list)
 for f in nldas_files:
-    year = os.path.basename(f).split('.')[1][1:5]
-    files_by_year[year].append(f)
+    try:
+        year = os.path.basename(f).split('.')[1][1:5]
+        files_by_year[year].append(f)
+    except Exception:
+        continue
 
 # ==========================================
 # 3. PRE-COMPUTE 15x15 KM BOUNDING BOX INDICES
@@ -303,11 +559,9 @@ for _, row in df_meta.iterrows():
     stn = row['Station']
     stn_lat, stn_lon = row['lat'], row['lon']
     
-    # Boolean masks for lat/lon within buffer
     y_mask = (grid_lats >= stn_lat - DEG_BUFFER) & (grid_lats <= stn_lat + DEG_BUFFER)
     x_mask = (grid_lons >= stn_lon - DEG_BUFFER) & (grid_lons <= stn_lon + DEG_BUFFER)
     
-    # If the point falls directly in the center of a pixel and misses the buffer, force minimum 1 nearest pixel
     if not y_mask.any():
         y_mask[np.abs(grid_lats - stn_lat).argmin()] = True
     if not x_mask.any():
@@ -324,12 +578,23 @@ for _, row in df_meta.iterrows():
     }
 
 # ==========================================
-# 4. YEARLY WORKER FUNCTION
+# 4. YEARLY WORKER FUNCTION (WITH CHECKPOINTS)
 # ==========================================
 def process_single_year(batch_data):
     year, files = batch_data
     
-    # Initialize dict to hold time-series arrays for this year
+    # CHECKPOINT 1: See if this year is already done for all stations
+    all_done = True
+    for stn in stn_names:
+        chk_file = os.path.join(INTERMEDIATE_DIR, str(stn), f"{year}.pkl")
+        if not os.path.exists(chk_file):
+            all_done = False
+            break
+            
+    if all_done:
+        return year, True # True flags that we loaded from checkpoint
+    
+    # Initialize dictionary
     year_results = {stn: {'times': []} for stn in stn_names}
     for stn in stn_names:
         for v in VARS_TO_EXTRACT.keys():
@@ -338,9 +603,8 @@ def process_single_year(batch_data):
     for f in files:
         try:
             basename = os.path.basename(f)
-            # Example: NLDAS_FOR0010_H.A20010101.030.beta.nc
-            date_str = basename.split('.')[1][1:] # '20010101'
-            hour_str = basename.split('.')[2][:2] # '03'
+            date_str = basename.split('.')[1][1:] 
+            hour_str = basename.split('.')[2][:2] 
             dt = pd.to_datetime(f"{date_str}{hour_str}", format="%Y%m%d%H")
             
             with nc.Dataset(f, 'r') as root:
@@ -349,19 +613,23 @@ def process_single_year(batch_data):
                     year_results[stn]['times'].append(dt)
                     
                     for var_name, nc_var in VARS_TO_EXTRACT.items():
-                        # Extract the slice: [time, lat_slice, lon_slice]
                         data_slice = root.variables[nc_var][:, box['y_slice'], box['x_slice']].filled(np.nan)
                         year_results[stn][var_name].append(data_slice)
         except Exception as e:
             continue
             
-    # Concatenate the lists along the time axis
+    # Save the data to checkpoint files (one per station for this year)
     for stn in stn_names:
         if year_results[stn]['times']:
+            stn_year_data = {'times': year_results[stn]['times']}
             for v in VARS_TO_EXTRACT.keys():
-                year_results[stn][v] = np.concatenate(year_results[stn][v], axis=0)
+                stn_year_data[v] = np.concatenate(year_results[stn][v], axis=0)
+            
+            chk_file = os.path.join(INTERMEDIATE_DIR, str(stn), f"{year}.pkl")
+            with open(chk_file, 'wb') as f:
+                pickle.dump(stn_year_data, f)
                 
-    return year, year_results
+    return year, False
 
 # ==========================================
 # 5. EXECUTE BATCHES & ASSEMBLE NetCDF
@@ -369,45 +637,57 @@ def process_single_year(batch_data):
 if __name__ == '__main__':
     print(f"\nStarting extraction on {NUM_WORKERS} cores...")
     
-    # Prepare master storage dict
-    master_data = {stn: {'times': []} for stn in stn_names}
-    for stn in stn_names:
-        for v in VARS_TO_EXTRACT.keys():
-            master_data[stn][v] = []
-
     tasks = list(files_by_year.items())
     
     with Pool(processes=NUM_WORKERS) as pool:
-        for year, year_results in pool.imap_unordered(process_single_year, tasks):
-            print(f"Finished extracting year: {year}")
-            for stn in stn_names:
-                if year_results[stn]['times']:
-                    master_data[stn]['times'].extend(year_results[stn]['times'])
-                    master_data[stn][v].append(year_results[stn][v])
+        for year, from_checkpoint in pool.imap_unordered(process_single_year, tasks):
+            if from_checkpoint:
+                print(f"Skipped extracting year {year} (found in checkpoints).")
+            else:
+                print(f"Finished extracting year: {year}")
 
-    print("\nExtraction complete! Calculating Thermodynamics and saving NetCDFs...")
+    print("\nExtraction complete! Assembling stations and calculating Thermodynamics...")
     
+    # Process final netcdfs station by station to save memory
     for stn in stn_names:
-        times = master_data[stn]['times']
-        if not times:
+        out_file = os.path.join(OUTPUT_DIR, f"{stn}_NLDAS_Subset.nc")
+        
+        # CHECKPOINT 2: Skip assembly if final NetCDF is already generated
+        if os.path.exists(out_file):
+            print(f"Final NetCDF for {stn} already exists. Skipping.")
             continue
             
-        # Sort by time just in case unordered multiprocessing mixed them up
-        sort_idx = np.argsort(times)
-        times = np.array(times)[sort_idx]
+        # Load all intermediate yearly files for this specific station
+        stn_pickles = glob.glob(os.path.join(INTERMEDIATE_DIR, str(stn), "*.pkl"))
+        if not stn_pickles:
+            print(f"No intermediate data found for {stn}. Skipping.")
+            continue
+            
+        stn_times = []
+        stn_vars = {v: [] for v in VARS_TO_EXTRACT.keys()}
+        
+        for pkl in stn_pickles:
+            with open(pkl, 'rb') as f:
+                yr_data = pickle.load(f)
+                stn_times.extend(yr_data['times'])
+                for v in VARS_TO_EXTRACT.keys():
+                    stn_vars[v].append(yr_data[v])
+                    
+        if not stn_times:
+            continue
+            
+        # Sort by time just in case files were read out of order
+        sort_idx = np.argsort(stn_times)
+        times = np.array(stn_times)[sort_idx]
         
         # Build Xarray Dataset
         ds_vars = {}
         box = stn_boxes[stn]
         
         for v in VARS_TO_EXTRACT.keys():
-            # Stack the yearly blocks together and sort by time
-            arr = np.concatenate(master_data[stn][v], axis=0)[sort_idx]
-            
-            # Precip fix: convert kg m-2 s-1 to mm/hour (multiply by 3600)
+            arr = np.concatenate(stn_vars[v], axis=0)[sort_idx]
             if v == 'Rainf':
                 arr = arr * 3600
-                
             ds_vars[v] = (['time', 'lat', 'lon'], arr)
             
         ds = xr.Dataset(
@@ -422,28 +702,20 @@ if __name__ == '__main__':
 
         # --- CALCULATE THERMODYNAMICS ---
         print(f"Calculating Wet Bulb and Enthalpy for {stn}...")
-        
-        # Flatten spatial dimensions for MetPy calculations
         tair_c = (ds['Tair'].values - 273.15) * units.degC
         psurf_pa = ds['PSurf'].values * units.Pa
-        qair = ds['Qair'].values # dimensionless (kg/kg)
+        qair = ds['Qair'].values 
         
-        # Calculate Relative Humidity from Specific Humidity
         rh = mpcalc.relative_humidity_from_specific_humidity(psurf_pa, tair_c, qair)
-        
-        # Calculate Dew Point
         dewpoint = mpcalc.dewpoint_from_relative_humidity(tair_c, rh)
         
-        # Wet Bulb Temperature
         wet_bulb = mpcalc.wet_bulb_temperature(psurf_pa, tair_c, dewpoint).m
         ds['Wet_Bulb_C'] = (['time', 'lat', 'lon'], wet_bulb)
         
-        # Moist Enthalpy (approximate moist static energy in kJ/kg)
         enthalpy = mpcalc.moist_static_energy(psurf_pa, tair_c, dewpoint).m / 1000
         ds['Enthalpy_kJ_kg'] = (['time', 'lat', 'lon'], enthalpy)
 
         # --- SAVE NetCDF ---
-        out_file = os.path.join(OUTPUT_DIR, f"{stn}_NLDAS_Subset.nc")
         ds.to_netcdf(out_file)
         print(f"Saved {out_file}")
 
