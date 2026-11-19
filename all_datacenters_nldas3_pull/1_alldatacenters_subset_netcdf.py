@@ -488,7 +488,7 @@ OUTPUT_DIR = '/discover/nobackup/cmbreen/datacenters/nldas_datacenter_subsets'
 TARGET_STATES = ['TX', 'IL', 'OH', 'VA', 'IA', 'NC', 'NM', 'NE']
 
 # Checkpoint directory
-INTERMEDIATE_DIR = os.path.join(OUTPUT_DIR, 'intermediate_yearly_checkpoints')
+INTERMEDIATE_DIR = os.path.join(OUTPUT_DIR, 'intermediate_yearly_checkpoints_wSnow')
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(INTERMEDIATE_DIR, exist_ok=True)
