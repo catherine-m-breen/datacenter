@@ -604,7 +604,7 @@ if __name__ == '__main__':
     os.makedirs(out_dir, exist_ok=True)
 
     tx_nldas3 = '/discover/nobackup/cmbreen/datacenters/texas_pure_hourly/tx_Pure_Hourly_Summary_FIXED.nc'
-    va_nldas3 = '/discover/nobackup/cmbreen/datacenters/va_pure_hourly/va_Pure_Hourly_Summary_FIXED.nc'
+    va_nldas3 = '/discover/nobackup/cmbreen/datacenters/virginia_pure_hourly/va_Pure_Hourly_Summary_FIXED.nc'
 
     # Build task list
     tasks = []
