@@ -499,7 +499,7 @@ VARS_TO_EXTRACT = {
     'Qair': 'Qair',    # kg/kg
     'PSurf': 'PSurf',  # Pa
     'Rainf': 'Rainf',  # kg m-2 s-1 (mm/s),
-    'Snowf': 'Snowf',  # kg m-2 s-1 (Frozen precipitation rate) - HIGHLY RECOMMENDED
+    # 'Snowf': 'Snowf',  # doesn't exist, but Rainf is written as 'total precipitation'
     'Wind': 'Wind'     # m/s
 }
 
