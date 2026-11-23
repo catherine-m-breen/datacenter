@@ -598,8 +598,8 @@ def process_single_year(batch_data):
     
     year_results = {stn: {'times': []} for stn in stn_names}
     for stn in stn_names:
-        import IPython
-        IPython.embed()
+        # import IPython
+        # IPython.embed()
         for v in VARS_TO_EXTRACT.keys():
             year_results[stn][v] = []
 
