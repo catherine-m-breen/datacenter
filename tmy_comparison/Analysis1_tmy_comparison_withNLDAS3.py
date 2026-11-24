@@ -1058,6 +1058,7 @@ analysis 1 and 2
 #     print(f"Analysis 2 Range Plots saved to: {analysis2_pdf}")
 #     print("\nAll tasks completed successfully!")
 
+
 '''
 
 analysis 1 and 2
@@ -1320,51 +1321,121 @@ if __name__ == '__main__':
 
     metrics_df = pd.DataFrame(all_raw_metrics)
 
+    # # ---------------------------------------------------------
+    # # ANALYSIS 1: Master Summary Threshold Scatterplots
+    # # ---------------------------------------------------------
+    # print("\n--- Generating Analysis 1 Outputs ---")
+    # master_pdf_path = os.path.join(out_dir, 'Analysis1_summary_threshold.pdf')
+        
+    # with PdfPages(master_pdf_path) as master_pdf:
+    #     sns.set_theme(style="whitegrid")
+        
+    #     for var_key, info in PLOT_CONFIGS.items():
+    #         var_df = metrics_df[metrics_df['var_key'] == var_key]
+    #         if var_df.empty: continue
+            
+    #         fig, axes = plt.subplots(nrows=2, ncols=3, figsize=(22, 14))
+    #         axes = axes.flatten()
+            
+    #         for idx, p in enumerate(P_COLD + P_HOT):
+    #             ax = axes[idx]
+    #             data_p = var_df[var_df['percentile'] == p]
+    #             if data_p.empty: continue
+
+    #             min_val = min(data_p['nldas_val'].min(), data_p['tmy_val'].min())
+    #             max_val = max(data_p['nldas_val'].max(), data_p['tmy_val'].max())
+    #             padding = (max_val - min_val) * 0.1
+    #             min_val -= padding
+    #             max_val += padding
+
+    #             ax.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.5, label='y=x (Zero Bias)')
+                
+    #             sns.scatterplot(
+    #                 data=data_p, x='nldas_val', y='tmy_val', 
+    #                 hue='state', s=120, alpha=0.8, ax=ax
+    #             )
+
+    #             ax.set_title(f"{p}th Percentile", fontweight='bold')
+    #             ax.set_xlabel(f"NLDAS-3 Percentile ({info['unit']})")
+    #             ax.set_ylabel(f"TMY Percentile ({info['unit']})")
+
+    #             if idx == 0:
+    #                 ax.legend(title="State", loc='upper left')
+    #             else:
+    #                 if ax.get_legend() is not None:
+    #                     ax.get_legend().remove()
+
+    #         plt.suptitle(f"Global Percentile Bias: TMY vs NLDAS-3 Historical\nVariable: {info['name']}", fontweight='bold', fontsize=20, y=1.02)
+    #         plt.tight_layout()
+    #         master_pdf.savefig(fig)
+    #         plt.close(fig)
+
+    # print(f"Analysis 1 Threshold Scatterplots saved to: {master_pdf_path}")
+
     # ---------------------------------------------------------
-    # ANALYSIS 1: Master Summary Threshold Scatterplots
+    # ANALYSIS 1: Master Summary Threshold Scatterplots (Poster Ready)
     # ---------------------------------------------------------
     print("\n--- Generating Analysis 1 Outputs ---")
     master_pdf_path = os.path.join(out_dir, 'Analysis1_summary_threshold.pdf')
         
     with PdfPages(master_pdf_path) as master_pdf:
-        sns.set_theme(style="whitegrid")
         
+        # Enforce Poster-Size Fonts globally for this section
+        sns.set_theme(style="whitegrid")
+        plt.rc('font', size=16)
+        plt.rc('axes', titlesize=20, labelsize=18)
+        plt.rc('xtick', labelsize=16)
+        plt.rc('ytick', labelsize=16)
+        plt.rc('legend', fontsize=16, title_fontsize=16)
+        
+        # Custom color map to color-code the thresholds (cold=blues, hot=reds)
+        pct_colors = {
+            '0.4th': '#005ce6', '1.0th': '#4da6ff', '2.0th': '#b3d9ff',
+            '98.0th': '#ffb3b3', '99.0th': '#ff4d4d', '99.6th': '#cc0000'
+        }
+
         for var_key, info in PLOT_CONFIGS.items():
-            var_df = metrics_df[metrics_df['var_key'] == var_key]
+            var_df = metrics_df[metrics_df['var_key'] == var_key].copy()
             if var_df.empty: continue
             
-            fig, axes = plt.subplots(nrows=2, ncols=3, figsize=(22, 14))
-            axes = axes.flatten()
+            # Convert percentile to string for categorical coloring in the legend
+            var_df['Percentile'] = var_df['percentile'].astype(str) + 'th'
             
-            for idx, p in enumerate(P_COLD + P_HOT):
-                ax = axes[idx]
-                data_p = var_df[var_df['percentile'] == p]
-                if data_p.empty: continue
+            # Create a single large, high-resolution figure per variable
+            fig, ax = plt.subplots(figsize=(12, 10))
+            
+            # Calculate global min and max to draw a perfect 1:1 line across all data
+            min_val = min(var_df['nldas_val'].min(), var_df['tmy_val'].min())
+            max_val = max(var_df['nldas_val'].max(), var_df['tmy_val'].max())
+            padding = (max_val - min_val) * 0.05
+            min_val -= padding
+            max_val += padding
 
-                min_val = min(data_p['nldas_val'].min(), data_p['tmy_val'].min())
-                max_val = max(data_p['nldas_val'].max(), data_p['tmy_val'].max())
-                padding = (max_val - min_val) * 0.1
-                min_val -= padding
-                max_val += padding
+            # Plot 1:1 Line
+            ax.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.7, linewidth=2.5, label='1:1 Line (Zero Bias)')
+            
+            # Plot the scatter points
+            sns.scatterplot(
+                data=var_df, 
+                x='nldas_val', 
+                y='tmy_val', 
+                hue='Percentile', 
+                style='state',      # Uses different shapes for TX vs VA
+                palette=pct_colors,
+                s=300,              # Very large dots for poster visibility
+                alpha=0.85, 
+                ax=ax
+            )
 
-                ax.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.5, label='y=x (Zero Bias)')
-                
-                sns.scatterplot(
-                    data=data_p, x='nldas_val', y='tmy_val', 
-                    hue='state', s=120, alpha=0.8, ax=ax
-                )
+            # Poster-ready labels
+            ax.set_title(f"Threshold Comparison: NLDAS-3 vs TMY\nVariable: {info['name']}", fontweight='bold', pad=20)
+            ax.set_xlabel(f"NLDAS-3 Threshold ({info['unit']})", fontweight='bold')
+            ax.set_ylabel(f"TMY Threshold ({info['unit']})", fontweight='bold')
 
-                ax.set_title(f"{p}th Percentile", fontweight='bold')
-                ax.set_xlabel(f"NLDAS-3 Percentile ({info['unit']})")
-                ax.set_ylabel(f"TMY Percentile ({info['unit']})")
+            # Format the legend (move it slightly outside the plot so it doesn't cover data)
+            ax.legend(loc='center left', bbox_to_anchor=(1.02, 0.5), markerscale=1.5, frameon=True, shadow=True)
 
-                if idx == 0:
-                    ax.legend(title="State", loc='upper left')
-                else:
-                    if ax.get_legend() is not None:
-                        ax.get_legend().remove()
-
-            plt.suptitle(f"Global Percentile Bias: TMY vs NLDAS-3 Historical\nVariable: {info['name']}", fontweight='bold', fontsize=20, y=1.02)
+            # Adjust layout to fit the external legend
             plt.tight_layout()
             master_pdf.savefig(fig)
             plt.close(fig)

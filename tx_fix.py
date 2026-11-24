@@ -1,3 +1,17 @@
+
+# ==============================================================================
+# SCRIPT PURPOSE & BACKGROUND:
+# This script repairs time coordinate corruption caused by the initial processing 
+# script. During the original run, shifting the timezone from UTC to Local Time 
+# using Pandas converted the standard NetCDF time into nanoseconds and created 
+# overlapping month boundaries. When xarray concatenated these overlapping files, 
+# it implicitly injected an illegal `_FillValue` into the time coordinate, making 
+# the final NetCDF file unreadable in standard climate tools (like Panoply). 
+# This script bypasses the corrupted time decoding, manually reconstructs the 
+# time arrays, and applies a strict encoding to strip the `_FillValue` and 
+# restore CF-compliant time units before saving the final file.
+# ==============================================================================
+
 import xarray as xr
 import pandas as pd
 import glob
