@@ -2219,7 +2219,8 @@ if __name__ == '__main__':
                     ax.legend(loc='upper left')
                     
             plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-            fig.savefig(f"{title}_highres.png", dpi=300, bbox_inches='tight') 
+            master_png_path = os.path.join(OUTPUT_DIR, "Global_CONUS_Scatter_HighRes.png")
+            fig.savefig(master_png_path, dpi=300, bbox_inches='tight') 
             pdf.savefig(fig); plt.close(fig)
 
             # --- 2. CONUS Overall Table ---
