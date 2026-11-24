@@ -1823,6 +1823,10 @@ import scipy.stats as stats
 import warnings
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing
+import matplotlib.pyplot as plt
+
+# Sets the default font size for EVERYTHING (titles, labels, ticks, legends) to 16
+plt.rcParams.update({'font.size': 16})
 
 warnings.filterwarnings('ignore')
 
@@ -2206,15 +2210,16 @@ if __name__ == '__main__':
                     ax.plot([mn, mx], [mn, mx], 'black', linestyle='--', lw=2, label='1:1 Line')
                     ax.set_xlim(mn, mx); ax.set_ylim(mn, mx)
                     
-                    ax.set_title(f"Overall {title}\nR²: {r2:.3f} | Bias: {bias:.3f}")
+                    ax.set_title(f"Overall {title}\nR²: {r2:.3f} | Bias: {bias:.3f}", fontsize=16)
                     ax.set_xlabel("USCRN Observation"); ax.set_ylabel("NLDAS3")
                     
                     bbox_props = dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.9, edgecolor='gray')
                     ax.text(0.95, 0.05, f'RMSE: {rmse:.2f}', transform=ax.transAxes, 
-                            fontsize=12, fontweight='bold', color='black', ha='right', va='bottom', bbox=bbox_props)
+                            fontsize=16, fontweight='bold', color='black', ha='right', va='bottom', bbox=bbox_props)
                     ax.legend(loc='upper left')
                     
             plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+            fig.savefig(f"{title}_highres.png", dpi=300, bbox_inches='tight') 
             pdf.savefig(fig); plt.close(fig)
 
             # --- 2. CONUS Overall Table ---
