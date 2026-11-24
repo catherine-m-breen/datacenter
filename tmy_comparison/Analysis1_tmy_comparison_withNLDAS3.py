@@ -1442,12 +1442,78 @@ if __name__ == '__main__':
 
     print(f"Analysis 1 Threshold Scatterplots saved to: {master_pdf_path}")
 
-    # ---------------------------------------------------------
-    # ANALYSIS 2: Specific Table & Range Plots
+    # # ---------------------------------------------------------
+    # # ANALYSIS 2: Specific Table & Range Plots
+    # # ---------------------------------------------------------
+    # print("\n--- Generating Analysis 2 Outputs ---")
+    
+    # # 2.1: CREATE THE EXACT TABLE FORMAT
+    # table_df = metrics_df.copy()
+    # table_df['NLDAS Range'] = table_df.apply(lambda row: f"{int(row['nldas_min'])} - {int(row['nldas_max'])}", axis=1)
+    
+    # table_export = table_df[['dc_id', 'state', 'var_key', 'percentile', 'tmy_count', 'nldas_med', 'nldas_mean', 'NLDAS Range']]
+    # table_export.columns = ['Datacenter', 'State', 'Variable', 'Percentile', 'TMY Count', 'NLDAS Med', 'NLDAS Mean', 'NLDAS Range']
+    
+    # analysis2_csv = os.path.join(out_dir, 'Analysis2_Exceedance_Table.csv')
+    # table_export.to_csv(analysis2_csv, index=False)
+    # print(f"Analysis 2 Table saved to: {analysis2_csv}")
+
+    # # 2.2: CREATE THE RANGE PLOT (VA on Left, TX on Right)
+    # analysis2_pdf = os.path.join(out_dir, 'Analysis2_Exceedance_Range_Plots.pdf')
+    
+    # with PdfPages(analysis2_pdf) as pdf:
+    #     for var_key, info in PLOT_CONFIGS.items():
+    #         var_df = metrics_df[metrics_df['var_key'] == var_key].copy()
+    #         if var_df.empty: continue
+            
+    #         var_df['sort_order'] = var_df['state'].map({'VA': 0, 'TX': 1})
+    #         var_df = var_df.sort_values(by=['sort_order', 'dc_id'])
+            
+    #         fig, axes = plt.subplots(nrows=2, ncols=3, figsize=(24, 16))
+    #         axes = axes.flatten()
+            
+    #         for idx, p in enumerate(P_COLD + P_HOT):
+    #             ax = axes[idx]
+    #             data_p = var_df[var_df['percentile'] == p].reset_index(drop=True)
+    #             if data_p.empty: continue
+
+    #             x_positions = np.arange(len(data_p))
+                
+    #             ax.vlines(x=x_positions, ymin=data_p['nldas_min'], ymax=data_p['nldas_max'], 
+    #                       color='gray', alpha=0.5, linewidth=4, label='NLDAS Range (Min-Max)', zorder=1)
+                
+    #             ax.scatter(x_positions, data_p['nldas_mean'], color='blue', marker='s', s=80, label='NLDAS Mean', zorder=2)
+    #             ax.scatter(x_positions, data_p['nldas_med'], color='green', marker='^', s=80, label='NLDAS Median', zorder=3)
+    #             ax.scatter(x_positions, data_p['tmy_count'], color='red', marker='*', s=300, edgecolor='black', linewidth=0.5, label='TMY Count', zorder=4)
+
+    #             va_count = (data_p['state'] == 'VA').sum()
+    #             if 0 < va_count < len(data_p):
+    #                 ax.axvline(x=va_count - 0.5, color='black', linestyle='--', alpha=0.6, zorder=0)
+    #                 ax.text(va_count/2 - 0.5, ax.get_ylim()[1]*0.95, 'Virginia (VA)', ha='center', fontweight='bold', alpha=0.7)
+    #                 ax.text((va_count + len(data_p))/2 - 0.5, ax.get_ylim()[1]*0.95, 'Texas (TX)', ha='center', fontweight='bold', alpha=0.7)
+
+    #             ax.set_title(f"{p}th Percentile Exceedances", fontweight='bold')
+    #             ax.set_ylabel("Total Hours")
+                
+    #             ax.set_xticks(x_positions)
+    #             ax.set_xticklabels(data_p['dc_id'].astype(str), rotation=90, fontsize=10)
+                
+    #             if idx == 0:
+    #                 ax.legend(loc='upper right', bbox_to_anchor=(1, 1), fancybox=True, shadow=True)
+
+    #         plt.suptitle(f"ANALYSIS 2: Exceedance Hours Distribution per Datacenter\nVariable: {info['name']}", fontweight='bold', fontsize=22, y=1.03)
+    #         plt.tight_layout()
+    #         pdf.savefig(fig)
+    #         plt.close(fig)
+
+        # ---------------------------------------------------------
+    # ANALYSIS 2: Specific Table & Range Plots (Poster Ready)
     # ---------------------------------------------------------
     print("\n--- Generating Analysis 2 Outputs ---")
     
-    # 2.1: CREATE THE EXACT TABLE FORMAT
+    # =========================================================
+    # 2.1: CREATE THE EXACT TABLE FORMAT (ALL DATACENTERS)
+    # =========================================================
     table_df = metrics_df.copy()
     table_df['NLDAS Range'] = table_df.apply(lambda row: f"{int(row['nldas_min'])} - {int(row['nldas_max'])}", axis=1)
     
@@ -1456,20 +1522,43 @@ if __name__ == '__main__':
     
     analysis2_csv = os.path.join(out_dir, 'Analysis2_Exceedance_Table.csv')
     table_export.to_csv(analysis2_csv, index=False)
-    print(f"Analysis 2 Table saved to: {analysis2_csv}")
+    print(f"Analysis 2 Table (All Data) saved to: {analysis2_csv}")
 
-    # 2.2: CREATE THE RANGE PLOT (VA on Left, TX on Right)
+    # =========================================================
+    # SUBSAMPLE LOGIC (Seed 42: 10 VA, 10 TX)
+    # =========================================================
+    np.random.seed(42)
+    va_dcs = metrics_df[metrics_df['state'] == 'VA']['dc_id'].unique()
+    tx_dcs = metrics_df[metrics_df['state'] == 'TX']['dc_id'].unique()
+    
+    va_sample = np.random.choice(va_dcs, min(10, len(va_dcs)), replace=False)
+    tx_sample = np.random.choice(tx_dcs, min(10, len(tx_dcs)), replace=False)
+    sampled_dcs = np.concatenate([va_sample, tx_sample])
+    
+    # Create a filtered dataframe just for the range plots
+    range_plot_df = metrics_df[metrics_df['dc_id'].isin(sampled_dcs)].copy()
+
+    # =========================================================
+    # 2.2: CREATE THE RANGE PLOT (Subsampled 20 DCs)
+    # =========================================================
     analysis2_pdf = os.path.join(out_dir, 'Analysis2_Exceedance_Range_Plots.pdf')
     
     with PdfPages(analysis2_pdf) as pdf:
+        sns.set_theme(style="whitegrid")
+        plt.rc('font', size=16)
+        plt.rc('axes', titlesize=20, labelsize=18)
+        plt.rc('xtick', labelsize=16) # Larger now that it's less crowded
+        plt.rc('ytick', labelsize=16)
+        plt.rc('legend', fontsize=16)
+
         for var_key, info in PLOT_CONFIGS.items():
-            var_df = metrics_df[metrics_df['var_key'] == var_key].copy()
+            var_df = range_plot_df[range_plot_df['var_key'] == var_key].copy()
             if var_df.empty: continue
             
             var_df['sort_order'] = var_df['state'].map({'VA': 0, 'TX': 1})
             var_df = var_df.sort_values(by=['sort_order', 'dc_id'])
             
-            fig, axes = plt.subplots(nrows=2, ncols=3, figsize=(24, 16))
+            fig, axes = plt.subplots(nrows=2, ncols=3, figsize=(28, 18))
             axes = axes.flatten()
             
             for idx, p in enumerate(P_COLD + P_HOT):
@@ -1479,32 +1568,119 @@ if __name__ == '__main__':
 
                 x_positions = np.arange(len(data_p))
                 
-                ax.vlines(x=x_positions, ymin=data_p['nldas_min'], ymax=data_p['nldas_max'], 
-                          color='gray', alpha=0.5, linewidth=4, label='NLDAS Range (Min-Max)', zorder=1)
+                if p >= 50:
+                    expected_hours = 8760 * ((100 - p) / 100)
+                else:
+                    expected_hours = 8760 * (p / 100)
                 
-                ax.scatter(x_positions, data_p['nldas_mean'], color='blue', marker='s', s=80, label='NLDAS Mean', zorder=2)
-                ax.scatter(x_positions, data_p['nldas_med'], color='green', marker='^', s=80, label='NLDAS Median', zorder=3)
-                ax.scatter(x_positions, data_p['tmy_count'], color='red', marker='*', s=300, edgecolor='black', linewidth=0.5, label='TMY Count', zorder=4)
+                # Plot 1: The Historical Range (Thick Gray Bars)
+                ax.vlines(x=x_positions, ymin=data_p['nldas_min'], ymax=data_p['nldas_max'], 
+                          color='gray', alpha=0.5, linewidth=10, label='NLDAS Historical Range', zorder=1)
+                
+                # Plot 2: NLDAS Mean
+                ax.scatter(x_positions, data_p['nldas_mean'], color='dodgerblue', marker='s', s=150, 
+                           edgecolor='black', label='NLDAS Mean', zorder=3)
+                
+                # Plot 3: TMY Count
+                ax.scatter(x_positions, data_p['tmy_count'], color='crimson', marker='*', s=600, 
+                           edgecolor='black', linewidth=1, label='TMY Actual Count', zorder=4)
 
+                # Plot 4: Theoretical Expectation
+                ax.axhline(expected_hours, color='black', linestyle='--', linewidth=2.5, 
+                           label=f'Theoretical Exp. ({expected_hours:.1f} hrs)', zorder=2)
+
+                # State Dividers
                 va_count = (data_p['state'] == 'VA').sum()
                 if 0 < va_count < len(data_p):
-                    ax.axvline(x=va_count - 0.5, color='black', linestyle='--', alpha=0.6, zorder=0)
-                    ax.text(va_count/2 - 0.5, ax.get_ylim()[1]*0.95, 'Virginia (VA)', ha='center', fontweight='bold', alpha=0.7)
-                    ax.text((va_count + len(data_p))/2 - 0.5, ax.get_ylim()[1]*0.95, 'Texas (TX)', ha='center', fontweight='bold', alpha=0.7)
+                    ax.axvline(x=va_count - 0.5, color='black', linestyle='-', linewidth=2, alpha=0.8, zorder=0)
+                    ax.text(va_count/2 - 0.5, ax.get_ylim()[1]*0.95, 'Virginia (VA)', ha='center', fontweight='bold', fontsize=18, alpha=0.8)
+                    ax.text((va_count + len(data_p))/2 - 0.5, ax.get_ylim()[1]*0.95, 'Texas (TX)', ha='center', fontweight='bold', fontsize=18, alpha=0.8)
 
-                ax.set_title(f"{p}th Percentile Exceedances", fontweight='bold')
-                ax.set_ylabel("Total Hours")
+                ax.set_title(f"{p}th Percentile Exceedances", fontweight='bold', pad=15)
+                ax.set_ylabel("Total Hours / Year", fontweight='bold')
                 
+                # Setup cleaner X-ticks (angled)
                 ax.set_xticks(x_positions)
-                ax.set_xticklabels(data_p['dc_id'].astype(str), rotation=90, fontsize=10)
+                ax.set_xticklabels(data_p['dc_id'].astype(str), rotation=45, ha='right')
                 
                 if idx == 0:
-                    ax.legend(loc='upper right', bbox_to_anchor=(1, 1), fancybox=True, shadow=True)
+                    ax.legend(loc='upper left', bbox_to_anchor=(0.02, 0.95), framealpha=0.9, shadow=True)
 
-            plt.suptitle(f"ANALYSIS 2: Exceedance Hours Distribution per Datacenter\nVariable: {info['name']}", fontweight='bold', fontsize=22, y=1.03)
+            plt.suptitle(f"Expected vs. Actual Exceedance Hours (Subsample: 10 VA, 10 TX)\nVariable: {info['name']}", fontweight='bold', fontsize=26, y=1.03)
             plt.tight_layout()
-            pdf.savefig(fig)
+            pdf.savefig(fig, bbox_inches='tight')
             plt.close(fig)
 
     print(f"Analysis 2 Range Plots saved to: {analysis2_pdf}")
+
+   # =========================================================
+    # 2.3: NEW SUMMARY PLOT (Violin Plot of Differences)
+    # USE ALL DATA
+    # =========================================================
+    analysis2_summary_pdf = os.path.join(out_dir, 'Analysis2_Summary_Violin.pdf')
+    
+    with PdfPages(analysis2_summary_pdf) as pdf:
+        sns.set_theme(style="whitegrid")
+        plt.rc('font', size=16)
+        plt.rc('axes', titlesize=22, labelsize=18)
+        plt.rc('xtick', labelsize=16)
+        plt.rc('ytick', labelsize=16)
+        plt.rc('legend', fontsize=16)
+        
+        for var_key, info in PLOT_CONFIGS.items():
+            var_df = metrics_df[metrics_df['var_key'] == var_key].copy()
+            if var_df.empty: continue
+            
+            # Calculate the difference (TMY - NLDAS Mean)
+            # Positive = TMY overestimates hours
+            # Negative = TMY underestimates hours
+            var_df['Hour_Difference'] = var_df['tmy_count'] - var_df['nldas_mean']
+            var_df['Percentile_Label'] = var_df['percentile'].astype(str) + 'th'
+            
+            # Force the correct order on the X-axis
+            pct_order = [f"{p}th" for p in (P_COLD + P_HOT)]
+            
+            fig, ax = plt.subplots(figsize=(16, 10))
+            
+            # Split Violin Plot
+            sns.violinplot(
+                data=var_df, 
+                x='Percentile_Label', 
+                y='Hour_Difference', 
+                hue='state', 
+                split=True,           # Puts VA on the left, TX on the right of each violin!
+                inner="quartile",     # Draws dashed lines inside for the quartiles
+                palette={'VA': '#4da6ff', 'TX': '#ff4d4d'}, 
+                order=pct_order,
+                linewidth=2,
+                ax=ax
+            )
+            
+            # Draw the Perfect Agreement Line (Y = 0)
+            ax.axhline(0, color='black', linestyle='--', linewidth=3, zorder=0)
+            
+            # Add text annotations for Over/Under estimation context
+            y_max = ax.get_ylim()[1]
+            y_min = ax.get_ylim()[0]
+            ax.text(0, y_max * 0.9, 'TMY Overestimates Hours', color='gray', fontweight='bold', fontsize=16, ha='left')
+            ax.text(0, y_min * 0.9, 'TMY Underestimates Hours', color='gray', fontweight='bold', fontsize=16, ha='left')
+
+            # Formatting
+            ax.set_title(f"Bias Spread: Difference Between TMY and Historical Mean\nVariable: {info['name']}", fontweight='bold', pad=20)
+            ax.set_xlabel("Percentile Threshold", fontweight='bold', labelpad=15)
+            ax.set_ylabel("Hour Difference (TMY - NLDAS Mean)", fontweight='bold', labelpad=15)
+            
+            # Clean up the legend
+            handles, labels = ax.get_legend_handles_labels()
+            ax.legend(handles=handles, labels=['Virginia (VA)', 'Texas (TX)'], title="State", loc='best', frameon=True, shadow=True)
+
+            plt.tight_layout()
+            pdf.savefig(fig, bbox_inches='tight')
+            plt.close(fig)
+
+
+    print(f"Analysis 2 Summary Scatter Plots saved to: {analysis2_summary_pdf}")
     print("\nAll tasks completed successfully!")
+
+    # print(f"Analysis 2 Range Plots saved to: {analysis2_pdf}")
+    # print("\nAll tasks completed successfully!")
