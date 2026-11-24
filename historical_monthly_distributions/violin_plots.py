@@ -1,0 +1,145 @@
+'''
+this should give you the violin plots 
+'''
+
+import os
+import gc
+import numpy as np
+import pandas as pd
+import xarray as xr
+import matplotlib.pyplot as plt
+import seaborn as sns
+import metpy.calc as mpcalc
+from metpy.units import units
+from matplotlib.backends.backend_pdf import PdfPages
+import warnings
+import matplotlib.pyplot as plt
+
+# Sets the default font size for EVERYTHING (titles, labels, ticks, legends) to 16
+plt.rcParams.update({'font.size': 16})
+
+
+warnings.filterwarnings('ignore')
+
+# ==========================================
+# 1. CONFIGURATIONS & PATHS
+# ==========================================
+csv_path = '/discover/nobackup/cmbreen/datacenters/data/im3_open_source_data_center_atlas_v2026.02.09.csv'
+tx_nldas3 = '/discover/nobackup/cmbreen/datacenters/texas_pure_hourly/tx_Pure_Hourly_Summary_FIXED.nc'
+va_nldas3 = '/discover/nobackup/cmbreen/datacenters/virginia_pure_hourly/va_Pure_Hourly_Summary_FIXED.nc'
+out_pdf = './Monthly_DayNight_Violin_Distributions.pdf'
+
+PLOT_VARS = [
+    {'col': 'Tair_C', 'name': 'Dry Bulb Temp', 'unit': '°C'},
+    {'col': 'Twb_C', 'name': 'Wet Bulb Temp', 'unit': '°C'},
+    {'col': 'RH', 'name': 'Relative Humidity', 'unit': '%'},
+    {'col': 'Enthalpy', 'name': 'Enthalpy', 'unit': 'kJ/kg'}
+]
+
+MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+PALETTE = {'Day': '#ffb347', 'Night': '#2b5b84'}  # Sun Gold and Night Navy
+
+# ==========================================
+# 2. DATA PROCESSING FUNCTION
+# ==========================================
+def extract_and_compute_state(state_abb, nldas_file, dc_df):
+    print(f"\n--- Processing {state_abb} ---")
+    state_dcs = dc_df[dc_df['state_abb'] == state_abb]
+    
+    print(f"Extracting {len(state_dcs)} datacenters from NetCDF...")
+    ds = xr.open_dataset(nldas_file)
+    
+    lats = xr.DataArray(state_dcs['lat'].values, dims='datacenter')
+    lons = xr.DataArray(state_dcs['lon'].values, dims='datacenter')
+    
+    ds_pts = ds.sel(lat=lats, lon=lons, method='nearest').compute()
+    df = ds_pts.to_dataframe().reset_index()
+    ds.close()
+    
+    tz_offset = -6 if state_abb == 'TX' else -5
+    df['time'] = df['time'] + pd.Timedelta(hours=tz_offset)
+    
+    df['Month'] = df['time'].dt.month
+    df['Hour'] = df['time'].dt.hour
+    
+    # Define Day (7 AM to 6:59 PM) and Night (7 PM to 6:59 AM)
+    df['Day_Night'] = np.where((df['Hour'] >= 7) & (df['Hour'] < 19), 'Day', 'Night')
+    
+    print("Computing MetPy variables (RH, Wet Bulb, Enthalpy)...")
+    temp = df['Tair_C'].values * units.degC
+    press = df.get('PSurf', np.full(len(df), 101325)).values * units.Pa
+    qair = df['Qair'].values * units('kg/kg')
+    
+    if 'RH' not in df.columns:
+        rh = mpcalc.relative_humidity_from_specific_humidity(press, temp, qair) * 100 * units.percent
+        df['RH'] = rh.m
+        
+    if 'Twb_C' not in df.columns:
+        dewpt = mpcalc.dewpoint_from_relative_humidity(temp, df['RH'].values * units.percent)
+        df['Twb_C'] = mpcalc.wet_bulb_temperature(press, temp, dewpt).m
+        
+    if 'Enthalpy' not in df.columns:
+        df['Enthalpy'] = 1.006 * temp.m + qair.m * (2501 + 1.86 * temp.m)
+        
+    cols_to_keep = ['Month', 'Day_Night', 'Tair_C', 'Twb_C', 'RH', 'Enthalpy']
+    df = df[cols_to_keep].dropna()
+    
+    return df
+
+# ==========================================
+# 3. MAIN EXECUTION & PLOTTING
+# ==========================================
+print("Loading Datacenter Metadata...")
+dc_df = pd.read_csv(csv_path)
+
+with PdfPages(out_pdf) as pdf:
+    sns.set_theme(style="whitegrid")
+    
+    for state_abb, nldas_file in [('VA', va_nldas3), ('TX', tx_nldas3)]:
+        df_state = extract_and_compute_state(state_abb, nldas_file, dc_df)
+        
+        # ---> IF JUPYTER CRASHES, UNCOMMENT THE LINE BELOW <---
+        #print("Downsampling to 10% for KDE stability...")
+        #df_state = df_state.sample(frac=0.10, random_state=42)
+        
+        print(f"Plotting 4x1 Violin Grid for {state_abb}...")
+        fig, axes = plt.subplots(nrows=4, ncols=1, figsize=(16, 24), sharex=True)
+        
+        for idx, var_info in enumerate(PLOT_VARS):
+            ax = axes[idx]
+            
+            sns.violinplot(
+                data=df_state, 
+                x='Month', 
+                y=var_info['col'], 
+                hue='Day_Night', 
+                split=True,            # Left half is Day, Right half is Night
+                inner="quartile",      # Show dashed lines for 25th, 50th, 75th percentiles
+                palette=PALETTE,
+                ax=ax,
+                linewidth=1.2,
+                cut=0                  # Stop the KDE at the strict bounds of the data (saves memory)
+            )
+            
+            ax.set_ylabel(f"{var_info['name']} ({var_info['unit']})", fontweight='bold', fontsize=16)
+            ax.tick_params(axis='y', labelsize=14)
+            
+            if idx == 0:
+                ax.legend(title='Time of Day', fontsize=14, title_fontsize=14, loc='upper right')
+                ax.set_title(f"{state_abb} Historical Monthly Distributions: Day vs Night", fontweight='bold', fontsize=22, pad=20)
+            else:
+                if ax.get_legend() is not None:
+                    ax.get_legend().remove()
+
+        axes[-1].set_xlabel("Month", fontweight='bold', fontsize=18)
+        axes[-1].set_xticks(range(12))
+        axes[-1].set_xticklabels(MONTH_NAMES, fontsize=16)
+        
+        plt.tight_layout()
+        pdf.savefig(fig)
+        plt.close(fig)
+        
+        del df_state
+        gc.collect()
+
+print(f"\nDone! PDF saved to: {out_pdf}")
