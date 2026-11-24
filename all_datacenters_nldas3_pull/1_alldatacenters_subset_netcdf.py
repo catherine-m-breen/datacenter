@@ -500,7 +500,8 @@ VARS_TO_EXTRACT = {
     'PSurf': 'PSurf',  # Pa
     'Rainf': 'Rainf',  # kg m-2 s-1 (mm/s),
     # 'Snowf': 'Snowf',  # doesn't exist, but Rainf is written as 'total precipitation'
-    'Wind': 'Wind'     # m/s
+    'Wind_N': 'Wind_N',     # m/s
+    'Wind_E': 'Wind_E'     # m/s
 }
 
 slurm_cpus = os.environ.get('SLURM_CPUS_PER_TASK')
