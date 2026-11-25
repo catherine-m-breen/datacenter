@@ -25,8 +25,8 @@ CSV_PATH = '/discover/nobackup/cmbreen/datacenters/data/im3_open_source_data_cen
 
 # NLDAS NetCDF Files (Update these to point to your real historical NLDAS data)
 # You can use glob patterns (e.g., 'path/to/nldas/*.nc') if using xr.open_mfdataset
-VA_NLDAS_PATH = '/discover/nobackup/cmbreen/datacenters/data/nldas_va_placeholder.nc'
-TX_NLDAS_PATH = '/discover/nobackup/cmbreen/datacenters/data/nldas_tx_placeholder.nc'
+VA_NLDAS_PATH = '/discover/nobackup/cmbreen/datacenters/virginia_pure_hourly/va_Pure_Hourly_Summary_FIXED.nc'
+TX_NLDAS_PATH = '/discover/nobackup/cmbreen/datacenters/texas_pure_hourly/tx_Pure_Hourly_Summary_FIXED.nc'
 
 # Bounding Boxes
 VA_BOUNDS = {'lat_min': 38.70, 'lat_max': 39.15, 'lon_min': -77.70, 'lon_max': -77.25}
