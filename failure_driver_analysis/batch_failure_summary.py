@@ -1922,7 +1922,6 @@
 
 '''
 
-
 new updates
 
 1. Updated Math (PI's Requests)
@@ -1947,6 +1946,7 @@ Clearer Numbers: Added explicit + or - signs to the surge values and bumped up t
 
 
 '''
+
 import xarray as xr
 import pandas as pd
 import numpy as np
@@ -1962,6 +1962,9 @@ import warnings
 import os
 warnings.filterwarnings('ignore')
 
+# Fix for Error 1 (Bottleneck missing module)
+xr.set_options(use_bottleneck=False) 
+
 # ==========================================
 # 0. CACHE & HELPERS
 # ==========================================
@@ -1975,6 +1978,7 @@ def get_precomputed_ashrae_background(nc_path, target_date_str):
     if cache_key not in SEASONAL_BG_CACHE:
         print(f"    -> [Cache Miss] Pre-computing {season_code} ASHRAE background (Runs ONLY ONCE per state/season!)")
         with xr.open_dataset(nc_path) as ds:
+            ds = ds.drop_duplicates(dim='time') # FIX: Drop duplicates
             ds_season = ds.isel(time=(ds['time'].dt.season == season_code))
             day_t = ds_season['DayTime_Avg_Tair'].values.flatten()
             day_q = ds_season['DayTime_Avg_Qair'].values.flatten()
@@ -2028,8 +2032,9 @@ def compute_threshold_stats(daily_path, hourly_path, thresh_path, target_date_st
     start_date = target_date - pd.Timedelta(days=14)
     end_date_full = target_date + pd.Timedelta(hours=23) 
     
-    ds_hourly = xr.open_dataset(hourly_path)
-    ds_thresh = xr.open_dataset(thresh_path)
+    # FIX: Drop duplicates when loading hourly and thresh datasets
+    ds_hourly = xr.open_dataset(hourly_path).drop_duplicates(dim='time')
+    ds_thresh = xr.open_dataset(thresh_path).drop_duplicates(dim='time')
     
     hourly_data = ds_hourly.sel(lat=dc_lat, lon=dc_lon, method='nearest').sel(time=slice(start_date, end_date_full)).load()
     history_data = hourly_data.sel(time=slice(start_date, target_date - pd.Timedelta(hours=1)))
@@ -2114,7 +2119,8 @@ def plot_datacenter_heat_map_tx(ax, target_date, df, ds_path, dc_id=None, is_sum
     aws_dcs = state_dcs[state_dcs['operator'].isin(aws_operators)]
     non_aws_dcs = state_dcs[~state_dcs['operator'].isin(aws_operators)]
 
-    ds = xr.open_dataset(ds_path)
+    # FIX: Drop duplicates when loading the daily path dataset
+    ds = xr.open_dataset(ds_path).drop_duplicates(dim='time')
     try: day_temp = ds.sel(time=target_date)['DayTime_Avg_Tair']
     except KeyError: ds.close(); return
 
@@ -2152,8 +2158,9 @@ def plot_failure_event_with_baselines(axes, ds_path, thresh_path, target_date_st
     end_date = target_date + pd.Timedelta(days=3)
     month_str = target_date.strftime('%Y-%m')
 
-    ds = xr.open_dataset(ds_path)
-    ds_thresh = xr.open_dataset(thresh_path)
+    # FIX: Drop duplicates when loading the daily path and thresholds
+    ds = xr.open_dataset(ds_path).drop_duplicates(dim='time')
+    ds_thresh = xr.open_dataset(thresh_path).drop_duplicates(dim='time')
     
     target_quantile = 0.02 if is_cold else 0.98
 
@@ -2255,7 +2262,9 @@ def plot_hourly_failure_event(axes, hourly_path, thresh_path, target_date_str, d
     
     target_quantile = 0.02 if is_cold else 0.98
 
-    ds_hourly, ds_thresh = xr.open_dataset(hourly_path), xr.open_dataset(thresh_path)
+    # FIX: Drop duplicates when loading hourly and thresh datasets
+    ds_hourly = xr.open_dataset(hourly_path).drop_duplicates(dim='time')
+    ds_thresh = xr.open_dataset(thresh_path).drop_duplicates(dim='time')
 
     if is_summary:
         dc_infos = df[df['id'].isin(dc_list)]
@@ -2325,6 +2334,7 @@ def plot_rh_seasonal_envelope(axes, nc_path, target_date_str, df, dc_id=None, is
     bg_data = get_precomputed_ashrae_background(nc_path, target_date_str)
     
     with xr.open_dataset(nc_path) as ds:
+        ds = ds.drop_duplicates(dim='time') # FIX: Drop duplicates
         if is_summary:
             dc_infos = df[df['id'].isin(dc_list)]
             lats, lons = xr.DataArray(dc_infos['lat'].values, dims='points'), xr.DataArray(dc_infos['lon'].values, dims='points')
@@ -2515,6 +2525,7 @@ if __name__ == "__main__":
     
     tx_daily_nc = '/discover/nobackup/cmbreen/datacenters/texas_hourly/tx_Daily_DayNight_Summary_CORRECTED.nc'
     with xr.open_dataset(tx_daily_nc) as ds_tx:
+        ds_tx = ds_tx.drop_duplicates(dim='time') # FIX: Drop duplicates here too for consistency
         tx_min_lat, tx_max_lat = ds_tx.lat.min().item(), ds_tx.lat.max().item()
         tx_min_lon, tx_max_lon = ds_tx.lon.min().item(), ds_tx.lon.max().item()
     

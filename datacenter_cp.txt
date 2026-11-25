@@ -38,3 +38,7 @@ scp -r cmbreen@discover.nccs.nasa.gov:/discover/nobackup/cmbreen/datacenters/dat
 scp -r cmbreen@discover.nccs.nasa.gov:/discover/nobackup/cmbreen/datacenters/datacenter/tmy_comparison_TX_VA /Users/cmbreen/Library/CloudStorage/OneDrive-NASA/oasis_datacenter/nldas_uscrn_tmy_bias_analysis
 
 scp -r cmbreen@discover.nccs.nasa.gov:/discover/nobackup/cmbreen/datacenters/datacenter/tmy_comparison_TX_VA /Users/cmbreen/Library/CloudStorage/OneDrive-NASA/oasis_datacenter/nldas_uscrn_tmy_bias_analysis
+
+scp -r cmbreen@discover.nccs.nasa.gov:/discover/nobackup/cmbreen/datacenters/station_comprehensive_reports /Users/cmbreen/Library/CloudStorage/OneDrive-NASA/oasis_datacenter/nldas_uscrn_tmy_bias_analysis
+
+scp -r cmbreen@discover.nccs.nasa.gov:/discover/nobackup/cmbreen/datacenters/output_pdfs /Users/cmbreen/Library/CloudStorage/OneDrive-NASA/oasis_datacenter/failure_driver_analysis
