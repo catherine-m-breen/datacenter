@@ -150,6 +150,191 @@ same thing but parallelized
 
 '''
 
+# import os
+# import gc
+# import numpy as np
+# import pandas as pd
+# import xarray as xr
+# import matplotlib.pyplot as plt
+# import seaborn as sns
+# import warnings
+# from matplotlib.backends.backend_pdf import PdfPages
+
+# # Import concurrent.futures for parallel processing
+# from concurrent.futures import ProcessPoolExecutor, as_completed
+
+# # Sets the default font size for EVERYTHING
+# plt.rcParams.update({'font.size': 16})
+# warnings.filterwarnings('ignore')
+
+# # ==========================================
+# # 1. CONFIGURATIONS & PATHS
+# # ==========================================
+# csv_path = '/discover/nobackup/cmbreen/datacenters/data/im3_open_source_data_center_atlas_v2026.02.09.csv'
+# tx_nldas3 = '/discover/nobackup/cmbreen/datacenters/texas_pure_hourly/tx_Pure_Hourly_Summary_FIXED.nc'
+# va_nldas3 = '/discover/nobackup/cmbreen/datacenters/virginia_pure_hourly/va_Pure_Hourly_Summary_FIXED.nc'
+# out_pdf = './Monthly_DayNight_Violin_Distributions.pdf'
+
+# PLOT_VARS = [
+#     {'col': 'Tair_C', 'name': 'Dry Bulb Temp', 'unit': '°C'},
+#     {'col': 'Twb_C', 'name': 'Wet Bulb Temp', 'unit': '°C'},
+#     {'col': 'RH', 'name': 'Relative Humidity', 'unit': '%'},
+#     {'col': 'Enthalpy', 'name': 'Enthalpy', 'unit': 'kJ/kg'}
+# ]
+
+# MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+# PALETTE = {'Day': '#ffb347', 'Night': '#2b5b84'}
+
+# # Detect available CPU cores (Safeguard for SLURM/Discover environments)
+# NUM_CORES = int(os.environ.get('SLURM_CPUS_PER_TASK', os.cpu_count() or 4))
+
+# # ==========================================
+# # 2. PARALLEL WORKER FUNCTION (MetPy)
+# # ==========================================
+# def compute_metpy_chunk(df_chunk):
+#     """
+#     Worker function to calculate MetPy variables on a chunk of the dataframe.
+#     By doing this in chunks, we bypass the single-thread bottleneck.
+#     """
+#     import metpy.calc as mpcalc
+#     from metpy.units import units
+#     import warnings
+#     warnings.filterwarnings('ignore') # Suppress pint unit warnings in worker threads
+
+#     temp = df_chunk['Tair_C'].values * units.degC
+#     press = df_chunk.get('PSurf', np.full(len(df_chunk), 101325)).values * units.Pa
+#     qair = df_chunk['Qair'].values * units('kg/kg')
+    
+#     if 'RH' not in df_chunk.columns:
+#         rh = mpcalc.relative_humidity_from_specific_humidity(press, temp, qair) * 100 * units.percent
+#         df_chunk['RH'] = rh.m
+        
+#     if 'Twb_C' not in df_chunk.columns:
+#         dewpt = mpcalc.dewpoint_from_relative_humidity(temp, df_chunk['RH'].values * units.percent)
+#         df_chunk['Twb_C'] = mpcalc.wet_bulb_temperature(press, temp, dewpt).m
+        
+#     if 'Enthalpy' not in df_chunk.columns:
+#         df_chunk['Enthalpy'] = 1.006 * temp.m + qair.m * (2501 + 1.86 * temp.m)
+        
+#     return df_chunk
+
+# # ==========================================
+# # 3. DATA PROCESSING FUNCTION
+# # ==========================================
+# def extract_and_compute_state(state_abb, nldas_file, dc_df):
+#     print(f"\n--- Processing {state_abb} ---")
+#     state_dcs = dc_df[dc_df['state_abb'] == state_abb]
+    
+#     print(f"[{state_abb}] Extracting {len(state_dcs)} datacenters from NetCDF...")
+    
+#     # Use context manager to ensure xarray closes cleanly and frees RAM
+#     with xr.open_dataset(nldas_file) as ds:
+#         lats = xr.DataArray(state_dcs['lat'].values, dims='datacenter')
+#         lons = xr.DataArray(state_dcs['lon'].values, dims='datacenter')
+        
+#         ds_pts = ds.sel(lat=lats, lon=lons, method='nearest').compute()
+#         df = ds_pts.to_dataframe().reset_index()
+    
+#     tz_offset = -6 if state_abb == 'TX' else -5
+#     df['time'] = df['time'] + pd.Timedelta(hours=tz_offset)
+    
+#     df['Month'] = df['time'].dt.month
+#     df['Hour'] = df['time'].dt.hour
+#     df['Day_Night'] = np.where((df['Hour'] >= 7) & (df['Hour'] < 19), 'Day', 'Night')
+    
+#     print(f"[{state_abb}] Computing MetPy variables in parallel across {NUM_CORES} cores...")
+    
+#     # Split the DataFrame into chunks (4 chunks per core prevents memory spiking and balances load)
+#     # Split the DataFrame into chunks safely using pandas .iloc to preserve the DataFrame type
+#     num_chunks = NUM_CORES * 4
+#     indices = np.array_split(range(len(df)), num_chunks)
+#     chunks = [df.iloc[idx] for idx in indices]
+#     processed_chunks = []
+    
+#     # Launch Multiprocessing Pool
+#     with ProcessPoolExecutor(max_workers=NUM_CORES) as executor:
+#         futures = [executor.submit(compute_metpy_chunk, chunk) for chunk in chunks]
+        
+#         for future in as_completed(futures):
+#             processed_chunks.append(future.result())
+            
+#     df = pd.concat(processed_chunks, ignore_index=True)
+    
+#     cols_to_keep = ['Month', 'Day_Night', 'Tair_C', 'Twb_C', 'RH', 'Enthalpy']
+#     return df[cols_to_keep].dropna()
+
+# # ==========================================
+# # 4. MAIN EXECUTION & PLOTTING
+# # ==========================================
+# if __name__ == '__main__':
+#     print("Loading Datacenter Metadata...")
+#     dc_df = pd.read_csv(csv_path)
+
+#     with PdfPages(out_pdf) as pdf:
+#         sns.set_theme(style="whitegrid")
+        
+#         for state_abb, nldas_file in [('VA', va_nldas3), ('TX', tx_nldas3)]:
+#             df_state = extract_and_compute_state(state_abb, nldas_file, dc_df)
+            
+#             # --- CRITICAL PLOTTING OPTIMIZATION ---
+#             # Plotting KDEs on >500k rows is visually identical to full dataset but takes hours.
+#             # Downsampling specifically for the plot step guarantees speed.
+#             MAX_PLOT_SAMPLES = 250_000 
+#             if len(df_state) > MAX_PLOT_SAMPLES:
+#                 print(f"[{state_abb}] Downsampling from {len(df_state):,} to {MAX_PLOT_SAMPLES:,} rows strictly to speed up KDE drawing...")
+#                 plot_df = df_state.sample(n=MAX_PLOT_SAMPLES, random_state=42)
+#             else:
+#                 plot_df = df_state
+                
+#             print(f"[{state_abb}] Plotting 4x1 Violin Grid...")
+#             fig, axes = plt.subplots(nrows=4, ncols=1, figsize=(16, 24), sharex=True)
+            
+#             for idx, var_info in enumerate(PLOT_VARS):
+#                 ax = axes[idx]
+                
+#                 sns.violinplot(
+#                     data=plot_df, 
+#                     x='Month', 
+#                     y=var_info['col'], 
+#                     hue='Day_Night', 
+#                     split=True,            
+#                     inner="quartile",      
+#                     palette=PALETTE,
+#                     ax=ax,
+#                     linewidth=1.2,
+#                     cut=0                  
+#                 )
+                
+#                 ax.set_ylabel(f"{var_info['name']} ({var_info['unit']})", fontweight='bold', fontsize=16)
+#                 ax.tick_params(axis='y', labelsize=16)
+                
+#                 if idx == 0:
+#                     ax.legend(title='Time of Day', fontsize=16, title_fontsize=14, loc='upper right')
+#                     ax.set_title(f"{state_abb} Historical Monthly Distributions: Day vs Night", fontweight='bold', fontsize=22, pad=20)
+#                 else:
+#                     if ax.get_legend() is not None:
+#                         ax.get_legend().remove()
+
+#             axes[-1].set_xlabel("Month", fontweight='bold', fontsize=18)
+#             axes[-1].set_xticks(range(12))
+#             axes[-1].set_xticklabels(MONTH_NAMES, fontsize=16)
+            
+#             plt.tight_layout()
+#             pdf.savefig(fig)
+#             plt.close(fig)
+            
+#             del df_state
+#             del plot_df
+#             gc.collect()
+
+#     print(f"\nDone! PDF saved to: {out_pdf}")
+
+'''
+
+added split plot and normal plot
+kept parallelized
+
+'''
 import os
 import gc
 import numpy as np
@@ -183,7 +368,9 @@ PLOT_VARS = [
 ]
 
 MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-PALETTE = {'Day': '#ffb347', 'Night': '#2b5b84'}
+
+# Using matplotlib's default tab colors: orange for Day, blue for Night
+PALETTE = {'Day': 'tab:orange', 'Night': 'tab:blue'}
 
 # Detect available CPU cores (Safeguard for SLURM/Discover environments)
 NUM_CORES = int(os.environ.get('SLURM_CPUS_PER_TASK', os.cpu_count() or 4))
@@ -245,7 +432,9 @@ def extract_and_compute_state(state_abb, nldas_file, dc_df):
     print(f"[{state_abb}] Computing MetPy variables in parallel across {NUM_CORES} cores...")
     
     # Split the DataFrame into chunks (4 chunks per core prevents memory spiking and balances load)
-    chunks = np.array_split(df, NUM_CORES * 4)
+    num_chunks = NUM_CORES * 4
+    indices = np.array_split(range(len(df)), num_chunks)
+    chunks = [df.iloc[idx] for idx in indices]
     processed_chunks = []
     
     # Launch Multiprocessing Pool
@@ -274,8 +463,6 @@ if __name__ == '__main__':
             df_state = extract_and_compute_state(state_abb, nldas_file, dc_df)
             
             # --- CRITICAL PLOTTING OPTIMIZATION ---
-            # Plotting KDEs on >500k rows is visually identical to full dataset but takes hours.
-            # Downsampling specifically for the plot step guarantees speed.
             MAX_PLOT_SAMPLES = 250_000 
             if len(df_state) > MAX_PLOT_SAMPLES:
                 print(f"[{state_abb}] Downsampling from {len(df_state):,} to {MAX_PLOT_SAMPLES:,} rows strictly to speed up KDE drawing...")
@@ -283,42 +470,50 @@ if __name__ == '__main__':
             else:
                 plot_df = df_state
                 
-            print(f"[{state_abb}] Plotting 4x1 Violin Grid...")
-            fig, axes = plt.subplots(nrows=4, ncols=1, figsize=(16, 24), sharex=True)
-            
-            for idx, var_info in enumerate(PLOT_VARS):
-                ax = axes[idx]
+            # --- GENERATE BOTH SPLIT AND SIDE-BY-SIDE PLOTS ---
+            for is_split in [True, False]:
+                plot_style = "Split" if is_split else "Side-by-Side"
+                print(f"[{state_abb}] Plotting 4x1 Violin Grid ({plot_style})...")
                 
-                sns.violinplot(
-                    data=plot_df, 
-                    x='Month', 
-                    y=var_info['col'], 
-                    hue='Day_Night', 
-                    split=True,            
-                    inner="quartile",      
-                    palette=PALETTE,
-                    ax=ax,
-                    linewidth=1.2,
-                    cut=0                  
-                )
+                fig, axes = plt.subplots(nrows=4, ncols=1, figsize=(16, 24), sharex=True)
                 
-                ax.set_ylabel(f"{var_info['name']} ({var_info['unit']})", fontweight='bold', fontsize=16)
-                ax.tick_params(axis='y', labelsize=14)
-                
-                if idx == 0:
-                    ax.legend(title='Time of Day', fontsize=14, title_fontsize=14, loc='upper right')
-                    ax.set_title(f"{state_abb} Historical Monthly Distributions: Day vs Night", fontweight='bold', fontsize=22, pad=20)
-                else:
-                    if ax.get_legend() is not None:
-                        ax.get_legend().remove()
+                for idx, var_info in enumerate(PLOT_VARS):
+                    ax = axes[idx]
+                    
+                    sns.violinplot(
+                        data=plot_df, 
+                        x='Month', 
+                        y=var_info['col'], 
+                        hue='Day_Night', 
+                        split=is_split,        # Toggles between split and side-by-side
+                        inner="quartile",      
+                        palette=PALETTE,
+                        ax=ax,
+                        linewidth=1.2,
+                        cut=0                  
+                    )
+                    
+                    # Force font size 16 for y-labels and ticks
+                    ax.set_ylabel(f"{var_info['name']}\n({var_info['unit']})", fontweight='bold', fontsize=16)
+                    ax.tick_params(axis='y', labelsize=16)
+                    
+                    if idx == 0:
+                        # Force font size 16 for legends and title
+                        ax.legend(title='Time of Day', fontsize=16, title_fontsize=16, loc='upper right')
+                        ax.set_title(f"{state_abb} Historical Monthly Distributions: Day vs Night ({plot_style})", fontweight='bold', fontsize=16, pad=20)
+                    else:
+                        if ax.get_legend() is not None:
+                            ax.get_legend().remove()
 
-            axes[-1].set_xlabel("Month", fontweight='bold', fontsize=18)
-            axes[-1].set_xticks(range(12))
-            axes[-1].set_xticklabels(MONTH_NAMES, fontsize=16)
-            
-            plt.tight_layout()
-            pdf.savefig(fig)
-            plt.close(fig)
+                # Force font size 16 for x-labels and ticks
+                axes[-1].set_xlabel("Month", fontweight='bold', fontsize=16)
+                axes[-1].tick_params(axis='x', labelsize=16)
+                axes[-1].set_xticks(range(12))
+                axes[-1].set_xticklabels(MONTH_NAMES, fontsize=16)
+                
+                plt.tight_layout()
+                pdf.savefig(fig)
+                plt.close(fig)
             
             del df_state
             del plot_df
