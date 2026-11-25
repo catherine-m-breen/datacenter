@@ -492,7 +492,9 @@ if __name__ == '__main__':
                         linewidth=1.2,
                         cut=0                  
                     )
-                    
+
+                    if var_info['col'] == 'RH':
+                        ax.set_ylim(0, 100)
                     # Force font size 16 for y-labels and ticks
                     ax.set_ylabel(f"{var_info['name']}\n({var_info['unit']})", fontweight='bold', fontsize=16)
                     ax.tick_params(axis='y', labelsize=16)
